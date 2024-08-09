@@ -1,0 +1,100 @@
+.boardContainer {
+  padding: 2vw 5vw;
+  background-color: azure;
+  min-height: 80vh; /* 최소 높이 설정 */
+  display: flex;
+  flex-direction: column;
+  width: 80%;
+}
+
+.boardHeader,
+.boardItem {
+  display: grid;
+  grid-template-columns: 1fr 4fr 2fr 2fr; /* 각 열의 비율 조정 */
+  padding: 10px;
+  border-bottom: 1px solid #ccc;
+  text-align: center; /* 텍스트 중앙 정렬 */
+}
+
+.boardHeader {
+  font-weight: bold;
+  background-color: #e0e0e0;
+}
+
+.boardItem {
+  background-color: #ffffff;
+}
+
+.boardItem:hover {
+  background-color: cadetblue; /* 배경색 변경 */
+}
+
+.boardItem:hover .boardItemField {
+  background-color: inherit; /* 부모의 배경색을 상속 */
+  color: white; /* 텍스트 색상 변경 */
+}
+
+.boardItemField {
+  padding: 5px 0;
+}
+
+.boardList {
+  margin-top: 10px;
+  max-height: 60vh;
+  overflow-y: auto; /* 리스트가 길 경우 스크롤 가능하게 설정 */
+  flex: 1; /* 남은 공간을 차지하게 설정 */
+}
+
+/* 전체 컨테이너를 상대 위치로 설정 */
+.paginationWrapper {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-top: 20px;
+}
+
+/* 페이지네이션 중앙 정렬 */
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* 페이지네이션 버튼 스타일 */
+.pageButton {
+  background-color: #007bff;
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  margin: 0 5px;
+  cursor: pointer;
+}
+
+.pageButton:hover {
+  background-color: #0056b3;
+}
+
+/* 글쓰기 버튼을 오른쪽에 고정 */
+.writeButton {
+  position: absolute;
+  right: 0; /* 오른쪽에 고정 */
+  background-color: #28a745;
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.writeButton:hover {
+  background-color: #218838;
+}
+
+.pageButton:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+.pageButton:hover:not(:disabled) {
+  background-color: #0056b3;
+}
