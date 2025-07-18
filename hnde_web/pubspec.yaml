@@ -15,12 +15,16 @@ dependencies:
   cloud_firestore: ^4.15.4
   # 기타 필요한 패키지
   # lucide_icons는 pub.dev에 없으므로 material_icons만 우선 사용
+  equatable: ^2.0.5
+  uuid: ^4.3.3
 
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   image_picker: ^1.1.2
+  http: ^1.4.0
+  provider: ^6.1.5
 
 dev_dependencies:
   flutter_test:
