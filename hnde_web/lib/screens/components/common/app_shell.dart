@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:hnde_web/const_value.dart';
 import 'package:provider/provider.dart';
 import '../../../core/loading_provider.dart';
-import 'sidebar.dart';
-import 'sidebar_menu_items.dart';
+import '../sidebar/sidebar.dart';
+import '../sidebar/sidebar_menu_items.dart';
 import 'loading_widget.dart';
 
 class AppShell extends StatefulWidget {
@@ -19,11 +20,22 @@ class _AppShellState extends State<AppShell> {
 
   int _getSelectedMenuIndex(BuildContext context) {
     final location = GoRouterState.of(context).uri.toString();
-    final idx = sidebarMenuItems.indexWhere((item) => location == item.routeName);
+    var idx =
+        sidebarMenuItems.indexWhere((item) => location == item.routeName);
+            
+    // 글쓰기 페이지일 경우 해당 메뉴 선택 표시(공지사항, 게시판 등등)
+    if(location == '/write-notice') {
+      idx = sidebarMenuItems.indexWhere((item) => item.routeName == '/notices');
+    }
+    // 공지사항 상세 페이지일 경우 공지사항 메뉴 선택 표시
+    if(location.startsWith('/notices/')) {
+      idx = sidebarMenuItems.indexWhere((item) => item.routeName == '/notices');
+    }
+    
     return idx >= 0 ? idx : 0;
   }
 
-  void _handleSidebarMenuTap(BuildContext context, int idx) {
+  void _handleSidebarMenuTap(BuildContext context, int idx) async {
     if (idx == -1) {
       setState(() {
         _sidebarCollapsed = !_sidebarCollapsed;
@@ -32,9 +44,33 @@ class _AppShellState extends State<AppShell> {
       final route = sidebarMenuItems[idx].routeName;
       final current = GoRouterState.of(context).uri.toString();
       if (current != route) {
-        context.go(route);
+        // 모달이 열려있는 경우 닫기
+        if (Navigator.of(context).canPop() && context.mounted) {
+          Navigator.of(context).pop();
+          return;
+        }
+        
+        if (context.mounted) {
+          context.go(route);
+        }
       }
     }
+  }
+
+  AppBar _buildAppBar(BuildContext context) {
+    return AppBar(
+      title: Padding(
+        padding: const EdgeInsets.only(left: 8.0),
+        child: Image.asset(
+          kLogoHorizontal,
+          width: 120,
+          height: 48,
+        ),
+      ),
+      backgroundColor: Colors.white,
+      foregroundColor: const Color(0xFF336699),
+      elevation: 0.5,
+    );
   }
 
   @override
@@ -44,12 +80,7 @@ class _AppShellState extends State<AppShell> {
     return Stack(
       children: [
         Scaffold(
-          appBar: AppBar(
-            title: Text(sidebarMenuItems[selectedMenu].label),
-            backgroundColor: Colors.white,
-            foregroundColor: const Color(0xFF336699),
-            elevation: 0.5,
-          ),
+          appBar: _buildAppBar(context),
           body: Row(
             children: [
               Sidebar(
@@ -72,9 +103,8 @@ class _AppShellState extends State<AppShell> {
                 color: Colors.black.withOpacity(0.5),
                 child: Center(
                   child: LoadingWidget(
-                    size: 200,
-                    text: loadingProvider.loadingText ?? '처리 중...'
-                  ),
+                      size: 200,
+                      text: loadingProvider.loadingText ?? '처리 중...'),
                 ),
               ),
             ),
@@ -82,4 +112,4 @@ class _AppShellState extends State<AppShell> {
       ],
     );
   }
-} 
+}

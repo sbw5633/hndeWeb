@@ -14,7 +14,7 @@ final appTheme = ThemeData(
     primary: const Color(0xFF4DA3D2),
     secondary: const Color(0xFF336699),
   ),
-  cardTheme: CardTheme(
+  cardTheme: CardThemeData(
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(24),
     ),

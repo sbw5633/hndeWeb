@@ -1,43 +1,5 @@
 import 'package:equatable/equatable.dart';
 
-/// 사업장 enum (확장성 확보 및 오타 방지)
-enum BusinessLocation {
-  /// 전체
-  all('전체'),
-  /// 본사
-  headquarters('본사'),
-  /// 만남(부산)휴
-  mannaeBusanRest('만남(부산)휴'),
-  /// 진영(순천)휴
-  jinYoungSoonChunRest('진영(순천)휴'),
-  /// 장안(울산)휴
-  jangAnUlsanRest('장안(울산)휴'),
-  /// 장안(부산)휴
-  jangAnBusanRest('장안(부산)휴'),
-  /// 동명(춘천)휴
-  dongMyungChunChunRest('동명(춘천)휴'),
-  /// 동명(부산)휴
-  dongMyungBusanRest('동명(부산)휴'),
-  /// 송산휴게소
-  songSanRestArea('송산휴게소'),
-  /// 만남(부산)주
-  mannaeBusanSub('만남(부산)주'),
-  /// 더웨이유통
-  deweyDistribution('더웨이유통'),
-  /// 더웨이본사
-  deweyHeadquarters('더웨이본사'),
-  /// 진안(장수)휴/주
-  jinAnJangSuRestSub('진안(장수)휴/주'),
-  /// 선산주유소
-  sunSanGasStation('선산주유소');
-
-  const BusinessLocation(this.displayName);
-  final String displayName;
-
-  @override
-  String toString() => displayName;
-}
-
 /// 게시물 모델 (공지, 일반, 익명, 자료취합 등 확장 가능)
 class BoardPost extends Equatable {
   /// 문서 ID
@@ -67,11 +29,11 @@ class BoardPost extends Equatable {
   /// 수정일시
   final DateTime updatedAt;
 
-  /// 이미지 URL 리스트
-  final List<String> images;
+  /// 이미지 URL 리스트 (이제는 [{url, name}])
+  final List<Map<String, String>> images;
 
-  /// 파일 URL 리스트
-  final List<String> files;
+  /// 파일 URL 리스트 (이제는 [{url, name}])
+  final List<Map<String, String>> files;
 
   /// 조회수
   final int views;
@@ -85,8 +47,8 @@ class BoardPost extends Equatable {
   /// 확장 필드 (자료취합 등 추가 정보)
   final Map<String, dynamic> extra;
 
-  /// 대상 사업장
-  final BusinessLocation targetGroup;
+  /// 대상 사업소 (이제는 String 또는 Map 등 서버 데이터 기반)
+  final String targetGroup;
 
   const BoardPost({
     required this.id,
@@ -109,16 +71,6 @@ class BoardPost extends Equatable {
 
   /// JSON → BoardPost
   factory BoardPost.fromJson(Map<String, dynamic> json, {String? id}) {
-    // targetGroup 파싱
-    BusinessLocation parseTargetGroup(dynamic value) {
-      if (value == null) return BusinessLocation.all;
-      final stringValue = value.toString();
-      return BusinessLocation.values.firstWhere(
-        (location) => location.displayName == stringValue,
-        orElse: () => BusinessLocation.all,
-      );
-    }
-
     return BoardPost(
       id: id ?? json['id'] as String? ?? '',
       type: json['type'] as String? ?? 'post',
@@ -133,13 +85,13 @@ class BoardPost extends Equatable {
       updatedAt: (json['updatedAt'] is DateTime)
           ? json['updatedAt'] as DateTime
           : DateTime.tryParse(json['updatedAt']?.toString() ?? '') ?? DateTime.now(),
-      images: (json['images'] as List?)?.map((e) => e.toString()).toList() ?? const [],
-      files: (json['files'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+      images: (json['images'] as List?)?.map((e) => e is Map<String, dynamic> ? e.map((k, v) => MapEntry(k, v.toString())) : {'url': e.toString(), 'name': ''}).toList() ?? const [],
+      files: (json['files'] as List?)?.map((e) => e is Map<String, dynamic> ? e.map((k, v) => MapEntry(k, v.toString())) : {'url': e.toString(), 'name': ''}).toList() ?? const [],
       views: json['views'] as int? ?? 0,
       likes: json['likes'] as int? ?? 0,
       commentsCount: json['commentsCount'] as int? ?? 0,
       extra: (json['extra'] as Map<String, dynamic>?) ?? <String, dynamic>{},
-      targetGroup: parseTargetGroup(json['targetGroup']),
+      targetGroup: json['targetGroup'] as String? ?? '',
     );
   }
 
@@ -161,7 +113,7 @@ class BoardPost extends Equatable {
       'likes': likes,
       'commentsCount': commentsCount,
       'extra': extra,
-      'targetGroup': targetGroup.displayName,
+      'targetGroup': targetGroup,
     };
   }
 
@@ -176,13 +128,13 @@ class BoardPost extends Equatable {
     bool? anonymity,
     DateTime? createdAt,
     DateTime? updatedAt,
-    List<String>? images,
-    List<String>? files,
+    List<Map<String, String>>? images,
+    List<Map<String, String>>? files,
     int? views,
     int? likes,
     int? commentsCount,
     Map<String, dynamic>? extra,
-    BusinessLocation? targetGroup,
+    String? targetGroup,
   }) {
     return BoardPost(
       id: id ?? this.id,

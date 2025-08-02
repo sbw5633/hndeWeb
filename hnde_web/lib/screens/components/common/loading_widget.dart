@@ -67,7 +67,7 @@ class _LoadingWidgetState extends State<LoadingWidget>
         });
       }
     } catch (e) {
-      print('로고 이미지 로드 실패: $e');
+      debugPrint('로고 이미지 로드 실패: $e');
     }
   }
 

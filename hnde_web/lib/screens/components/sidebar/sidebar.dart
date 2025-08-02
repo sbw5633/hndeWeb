@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
-import '../../../const_value.dart';
+import 'package:provider/provider.dart';
+
 import 'sidebar_menu_items.dart';
+import 'dashboard_appbar_userinfo.dart';
+import '../../../core/auth_provider.dart';
+import '../../../utils/dialog_utils.dart';
 
 class Sidebar extends StatelessWidget {
   final bool isCollapsed;
@@ -25,34 +29,59 @@ class Sidebar extends StatelessWidget {
               color: const Color(0xFF4DA3D2),
               child: Column(
                 children: [
-                  const SizedBox(height: 32),
-                  if (!isCollapsed)
-                    Image.asset(kLogoVertical, width: 80, height: 80),
-                  if (!isCollapsed) const SizedBox(height: 16),
+                  const SizedBox(height: 16),
+                  // 회원정보/로그인 UI
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                    child: Consumer<AuthProvider>(
+                      builder: (context, authProvider, child) {
+                        return DashboardAppBarUserInfo(
+                          loggedIn: authProvider.isLoggedIn,
+                          name: authProvider.appUser?.name,
+                          position: authProvider.appUser?.role,
+                          branch: authProvider.appUser?.affiliation,
+                          onLogout: () => authProvider.logout(),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 16),
                   // 메뉴 리스트 스크롤 영역
                   Expanded(
                     child: SingleChildScrollView(
-                      child: Column(
-                        children: [
-                          ...sidebarMenuItems.asMap().entries.map((entry) {
-                            final idx = entry.key;
-                            final item = entry.value;
-                            return SidebarNavItem(
-                              icon: item.icon,
-                              label: item.label,
-                              selected: idx == selectedIndex,
-                              isCollapsed: isCollapsed,
-                              onTap: () => onMenuTap?.call(idx),
-                            );
-                          }),
-                        ],
+                      child: Consumer<AuthProvider>(
+                        builder: (context, authProvider, child) {
+                          return Column(
+                            children: [
+                              ...sidebarMenuItems.asMap().entries.map((entry) {
+                                final idx = entry.key;
+                                final item = entry.value;
+
+                                // 관리자 메뉴는 관리자만 볼 수 있음
+                                if (item.label == '관리자' &&
+                                    !authProvider.isAdmin) {
+                                  return const SizedBox.shrink();
+                                }
+
+                                return SidebarNavItem(
+                                  icon: item.icon,
+                                  label: item.label,
+                                  selected: idx == selectedIndex,
+                                  isCollapsed: isCollapsed,
+                                  onTap: () => onMenuTap?.call(idx),
+                                );
+                              }),
+                            ],
+                          );
+                        },
                       ),
                     ),
                   ),
                   if (!isCollapsed)
                     const Padding(
                       padding: EdgeInsets.all(16.0),
-                      child: Text('© 2024 회사명', style: TextStyle(color: Colors.white70)),
+                      child: Text('© 2024 회사명',
+                          style: TextStyle(color: Colors.white70)),
                     ),
                 ],
               ),
@@ -156,11 +185,23 @@ class SidebarNavItem extends StatelessWidget {
           : null,
       child: ListTile(
         leading: Icon(icon, color: Colors.white),
-        title: isCollapsed ? null : Text(label, style: const TextStyle(color: Colors.white)),
-        onTap: onTap,
+        title: isCollapsed
+            ? null
+            : Text(label, style: const TextStyle(color: Colors.white)),
+        onTap: () async {
+          final shouldNavigate =
+              await DialogUtils.showExitConfirmationDialog(context);
+
+          if (shouldNavigate != true) {
+            return; // 사용자가 취소한 경우
+          }
+
+          // 페이지 이동
+          onTap?.call();
+        },
         contentPadding: EdgeInsets.symmetric(horizontal: isCollapsed ? 8 : 16),
         minLeadingWidth: 0,
       ),
     );
   }
-} 
+}

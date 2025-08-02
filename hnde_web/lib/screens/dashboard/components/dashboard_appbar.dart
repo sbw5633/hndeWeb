@@ -13,10 +13,7 @@ class DashboardAppBar extends StatelessWidget {
         children: [
           const Text('사내 업무 시스템', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF336699))),
           const Spacer(),
-          IconButton(
-            icon: const Icon(Icons.account_circle, size: 32, color: Color(0xFF336699)),
-            onPressed: () {},
-          ),
+          
         ],
       ),
     );
