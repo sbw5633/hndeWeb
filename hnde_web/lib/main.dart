@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'firebase_options.dart';
 import 'app.dart';
 
 void main() async {
+  // 환경변수 로드
+  await dotenv.load(fileName: ".env");
+  
   WidgetsFlutterBinding.ensureInitialized();
   
   // Flutter 오류 처리 설정

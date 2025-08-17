@@ -6,13 +6,33 @@ import 'dart:convert';
 import 'dart:html' as html;
 import 'package:crypto/crypto.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class S3Service {
-  // AWS S3 설정 정보
-  static const String _accessKeyId = 'AKIAZQSDA7F3LDKMFCG7';
-  static const String _secretAccessKey = '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';
-  static const String _region = 'ap-northeast-2';
-  static const String _bucketName = 'hnde-web-files';
+  // AWS S3 설정 정보 - 환경변수에서 읽기
+  static String get _accessKeyId {
+    final key = dotenv.env['AWS_ACCESS_KEY_ID'];
+    if (key == null || key.isEmpty) {
+      throw Exception('AWS_ACCESS_KEY_ID 환경변수가 설정되지 않았습니다.');
+    }
+    return key;
+  }
+  
+  static String get _secretAccessKey {
+    final key = dotenv.env['AWS_SECRET_ACCESS_KEY'];
+    if (key == null || key.isEmpty) {
+      throw Exception('AWS_SECRET_ACCESS_KEY 환경변수가 설정되지 않았습니다.');
+    }
+    return key;
+  }
+  
+  static String get _region {
+    return dotenv.env['AWS_REGION'] ?? 'ap-northeast-2';
+  }
+  
+  static String get _bucketName {
+    return dotenv.env['AWS_BUCKET_NAME'] ?? 'hnde-web-files';
+  }
   
   // S3 엔드포인트
   static String get _endpoint => 'https://$_bucketName.s3.$_region.amazonaws.com';
