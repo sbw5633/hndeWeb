@@ -46,16 +46,11 @@ class DashboardAppBarUserInfo extends StatelessWidget {
       );
     }
 
-    return Row(
-      children: [
-        // Image.asset(kLogoVertical, width: 48, height: 48),
-        const SizedBox(width: 16),
-        Expanded(
-          child: loggedIn
-              ? _buildUserInfo()
-              : const LoginForm(),
-        ),
-      ],
+    return Expanded(
+      child: 
+        loggedIn
+            ? _buildUserInfo()
+            : const LoginForm(),
     );
   }
 }

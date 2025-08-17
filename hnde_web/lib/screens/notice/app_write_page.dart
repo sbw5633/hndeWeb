@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:hnde_web/core/select_info_provider.dart';
 import 'package:provider/provider.dart';
+import '../../const_value.dart';
 import '../../core/auth_provider.dart';
 import '../../core/loading_provider.dart';
 import '../../core/page_state_provider.dart';
@@ -12,23 +13,24 @@ import '../../utils/dialog_utils.dart';
 
 import 'package:uuid/uuid.dart';
 
-class WriteNoticePage extends StatefulWidget {
-  const WriteNoticePage({super.key});
+class AppWritePage extends StatefulWidget {
+  final MenuType type;
+  const AppWritePage({super.key, required this.type});
 
   @override
-  State<WriteNoticePage> createState() => _WriteNoticePageState();
+  State<AppWritePage> createState() => _AppWritePageState();
 }
 
-class _WriteNoticePageState extends State<WriteNoticePage> {
-
+class _AppWritePageState extends State<AppWritePage> {
   // PostEditorForm의 submitForm 메서드에 접근하기 위한 콜백
   VoidCallback? _submitFormCallback;
 
-
   @override
   Widget build(BuildContext context) {
-  final AuthProvider authProvider = context.read<AuthProvider>();
-  final SelectInfoProvider selectInfoProvider = context.read<SelectInfoProvider>();
+    final AuthProvider authProvider = context.read<AuthProvider>();
+    final SelectInfoProvider selectInfoProvider =
+        context.read<SelectInfoProvider>();
+
     return WillPopScope(
       onWillPop: () async {
         final pageStateProvider = context.read<PageStateProvider>();
@@ -42,7 +44,7 @@ class _WriteNoticePageState extends State<WriteNoticePage> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('공지사항 작성'),
+          title: Text('${widget.type.label} 작성'),
           actions: [
             // 등록 버튼 - 입력된 내용이 있을 때만 활성화
             Consumer<PageStateProvider>(
@@ -72,10 +74,17 @@ class _WriteNoticePageState extends State<WriteNoticePage> {
           child: PostEditorForm(
             authProvider: authProvider,
             selectInfoProvider: selectInfoProvider,
-            type: 'notice',
+            type: widget.type,
             onSubmit: (title, content, images, files, selectedBranch) async {
               // 제출 실행
-              await _submitForm(title, content, images, files, selectedBranch);
+              await _submitForm(
+                title: title,
+                content: content,
+                images: images,
+                files: files,
+                selectedBranch: selectedBranch,
+                type: widget.type,
+              );
             },
             onFormReady: (submitCallback) {
               // PostEditorForm이 준비되면 submitForm 콜백 저장
@@ -87,9 +96,14 @@ class _WriteNoticePageState extends State<WriteNoticePage> {
     );
   }
 
-  Future<void> _submitForm(String title, String content,
-      List<Map<String, String>> images, List<Map<String, String>> files, String? selectedBranch) async {
-    context.read<LoadingProvider>().setLoading(true, text: '공지사항 등록 중...');
+  Future<void> _submitForm(
+      {required String title,
+      required String content,
+      List<Map<String, String>>? images,
+      List<Map<String, String>>? files,
+      String? selectedBranch,
+      required MenuType type}) async {
+    context.read<LoadingProvider>().setLoading(true, text: '등록 중...');
     try {
       // Firestore에서 사용할 새 ID 생성
       final newId = const Uuid().v4();
@@ -102,16 +116,16 @@ class _WriteNoticePageState extends State<WriteNoticePage> {
 
       final post = BoardPost(
         id: newId,
-        type: 'notice',
+        type: type.name,
         title: title,
         content: content,
         authorId: firebaseUser?.uid ?? currentUser?.uid ?? 'unknown',
         authorName: currentUser?.name ?? firebaseUser?.displayName ?? '관리자',
-        anonymity: false,
+        anonymity: type == MenuType.anonymousBoard ? true : false,  // 익명게시판일 경우 익명으로 설정. 게시물 불러올때 익명 여부에 따라 처리
         createdAt: now,
         updatedAt: now,
-        images: images,
-        files: files,
+        images: images ?? [],
+        files: files ?? [],
         views: 0,
         likes: 0,
         commentsCount: 0,
@@ -121,16 +135,16 @@ class _WriteNoticePageState extends State<WriteNoticePage> {
       await BoardPostService.addBoardPost(post);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('공지 등록 완료!')),
+          SnackBar(content: Text('${type.label} 등록 완료!')),
         );
-        context.go('/notices');
+        context.go(type.route);
 
         // Navigator.of(context).pop();
       }
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('등록 실패: \n$e')),
+          SnackBar(content: Text('${type.label} 등록 실패: \n$e')),
         );
       }
     } finally {

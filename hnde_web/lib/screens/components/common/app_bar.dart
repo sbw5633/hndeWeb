@@ -13,7 +13,7 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   final String title;
   final String tooltip;
-  final Widget writePage; // 추가: 이동할 페이지 위젯
+  final String writePage; // 추가: 이동할 페이지 위젯
 
   @override
   Size get preferredSize => const Size.fromHeight(kToolbarHeight);
@@ -32,7 +32,8 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
               icon: const Icon(Icons.edit),
               tooltip: tooltip,
               onPressed: () async {
-                context.go('/write-notice'); // 모달 대신 라우팅
+                // context.go('/write-notice'); // 모달 대신 라우팅
+                context.go(writePage);
               },
             ),
           ),

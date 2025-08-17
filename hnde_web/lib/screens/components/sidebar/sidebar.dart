@@ -31,6 +31,9 @@ class Sidebar extends StatelessWidget {
                 children: [
                   const SizedBox(height: 16),
                   // 회원정보/로그인 UI
+                  if (isCollapsed)
+                    const Icon(Icons.account_circle, color: Colors.white, size: 32)
+                  else
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 8.0),
                     child: Consumer<AuthProvider>(

@@ -31,7 +31,25 @@ class _AppShellState extends State<AppShell> {
     if(location.startsWith('/notices/')) {
       idx = sidebarMenuItems.indexWhere((item) => item.routeName == '/notices');
     }
-    
+    if(location == '/write-board') {
+      idx = sidebarMenuItems.indexWhere((item) => item.routeName == '/boards');
+    }
+    if(location.startsWith('/boards/')) {
+      idx = sidebarMenuItems.indexWhere((item) => item.routeName == '/boards');
+    }
+    if(location == '/write-anonymous-board') {
+      idx = sidebarMenuItems.indexWhere((item) => item.routeName == '/anonymous-boards');
+    }
+    if(location.startsWith('/anonymous-boards/')) {
+      idx = sidebarMenuItems.indexWhere((item) => item.routeName == '/anonymous-boards');
+    }
+    if(location == '/write-data-request') {
+      idx = sidebarMenuItems.indexWhere((item) => item.routeName == '/data-requests');
+    }
+    if(location.startsWith('/data-requests/')) {
+      idx = sidebarMenuItems.indexWhere((item) => item.routeName == '/data-requests');
+    }
+
     return idx >= 0 ? idx : 0;
   }
 

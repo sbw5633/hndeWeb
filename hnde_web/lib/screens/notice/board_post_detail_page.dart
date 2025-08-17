@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../../const_value.dart';
 import '../../models/board_post_model.dart';
 import '../../services/firebase/board_post_service.dart';
 import 'dart:html';
 
 class BoardPostDetailPage extends StatefulWidget {
   final String postId;
-  const BoardPostDetailPage({super.key, required this.postId});
+  final MenuType type;
+  const BoardPostDetailPage({super.key, required this.postId, required this.type});
 
   @override
   State<BoardPostDetailPage> createState() => _BoardPostDetailPageState();
@@ -42,6 +44,8 @@ class _BoardPostDetailPageState extends State<BoardPostDetailPage> {
     }
   }
 
+  
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -53,10 +57,10 @@ class _BoardPostDetailPageState extends State<BoardPostDetailPage> {
     if (_error != null || _post == null) {
       return Scaffold(
         appBar: AppBar(
-          title: const Text('공지사항'),
+          title: const Text('일시적 오류'),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
-            onPressed: () => context.go('/notices'),
+            onPressed: () => context.go(widget.type.route),
           ),
         ),
         body: Center(
@@ -68,7 +72,7 @@ class _BoardPostDetailPageState extends State<BoardPostDetailPage> {
               Text(_error ?? '게시물을 찾을 수 없습니다.'),
               const SizedBox(height: 16),
               ElevatedButton(
-                onPressed: () => context.go('/notices'),
+                onPressed: () => context.go(widget.type.route),
                 child: const Text('목록으로 돌아가기'),
               ),
             ],
@@ -77,20 +81,50 @@ class _BoardPostDetailPageState extends State<BoardPostDetailPage> {
       );
     }
 
-    return _BoardPostDetailContent(post: _post!);
+    return _BoardPostDetailContent(post: _post!, type: widget.type);
   }
 }
 
 class _BoardPostDetailContent extends StatelessWidget {
   final BoardPost post;
-  const _BoardPostDetailContent({required this.post});
+  final MenuType type;
+  const _BoardPostDetailContent({required this.post, required this.type});
+
+  String getTitle() {
+    switch (type) {
+      case MenuType.notice:
+        return '공지사항';
+      case MenuType.board:
+        return '게시판';
+      case MenuType.anonymousBoard:
+        return '익명게시판';
+      case MenuType.dataRequest:
+        return '자료요청';
+      default:
+        return '게시물';
+    }
+  }
+
+  String getRoute() {
+
+    switch (type) {
+      case MenuType.notice:
+        return '/notices';
+      case MenuType.board:
+        return '/boards';
+      case MenuType.anonymousBoard:
+        return '/anonymous-boards';
+      case MenuType.dataRequest:
+        return '/data-requests';
+      default:
+        return '/';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final isAnonymous = post.type == 'anonymous';
-    final isDataRequest = post.type == 'dataRequest';
-    final isNotice = post.type == 'notice';
-    final isGeneral = post.type == 'post';
+    final isAnonymous = post.anonymity;
+    final isDataRequest = type == MenuType.dataRequest;
     final authorName = isAnonymous ? '익명' : post.authorName;
     final createdAt = post.createdAt;
     final images = post.images;
@@ -107,7 +141,7 @@ class _BoardPostDetailContent extends StatelessWidget {
           const Text('첨부 파일', style: TextStyle(fontWeight: FontWeight.bold)),
           ...files.map((file) => ListTile(
                 leading: const Icon(Icons.insert_drive_file, color: Colors.grey),
-                title: Text(file['name'] ?? file['url']?.split('/')?.last ?? ''),
+                title: Text(file['name'] ?? file['url']?.split('/').last ?? ''),
                 onTap: () {
                   final url = file['url'] ?? '';
                   final name = file['name'] ?? url.split('/').last;
@@ -203,7 +237,7 @@ class _BoardPostDetailContent extends StatelessWidget {
           ...statusList.map((e) {
             final branch = e['branch'] ?? '-';
             final uploaded = e['uploaded'] == true;
-            final fileUrl = e['fileUrl'] ?? null;
+            final fileUrl = e['fileUrl'] ?? '';
             return ListTile(
               leading: Icon(uploaded ? Icons.check_circle : Icons.cancel, color: uploaded ? Colors.green : Colors.red),
               title: Text(branch),
@@ -212,17 +246,17 @@ class _BoardPostDetailContent extends StatelessWidget {
                 // 파일 다운로드/미리보기 등 구현
               } : null,
             );
-          }).toList(),
+          }),
         ],
       );
     }
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('공지사항'),
+        title: Text(getTitle()),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/notices'),
+          onPressed: () => context.go(getRoute()),
         ),
       ),
       body: SingleChildScrollView(
@@ -338,7 +372,7 @@ class _HoverImageWithOverlayState extends State<_HoverImageWithOverlay> {
             if (_hovered)
               Positioned.fill(
                 child: Container(
-                  color: Colors.black.withOpacity(0.5),
+                  color: Colors.black.withValues(alpha: 0.5),
                   child: Center(
                     child: Padding(
                       padding: const EdgeInsets.all(8.0),

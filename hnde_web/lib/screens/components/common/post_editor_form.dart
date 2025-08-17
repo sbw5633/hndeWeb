@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 
 import 'storage_upload_button.dart';
-import '../../../services/file_upload_service.dart';
 import 'package:provider/provider.dart';
 import '../../../core/loading_provider.dart';
 import '../../../core/select_info_provider.dart';
 import '../../../core/page_state_provider.dart';
 import '../../../core/auth_provider.dart';
 import '../../../models/file_info_model.dart';
+import '../../../const_value.dart';
 
 class PostEditorForm extends StatefulWidget {
-  final String type; // 'notice' | 'board' | 'dataRequest' 등
+  final MenuType type; // 'notice' | 'board' | 'dataRequest' 등
   final void Function(
       String title,
       String content,
@@ -53,9 +53,8 @@ class _PostEditorFormState extends State<PostEditorForm> {
 
   String? _selectedBranch; // 선택된 사업소
 
-
   int? _hoveredImageIndex; // 마우스 오버된 이미지 인덱스
-  
+
   // Provider 참조 저장
   PageStateProvider? _pageStateProvider;
   List<Map<String, String>> branchOptions = [];
@@ -64,12 +63,13 @@ class _PostEditorFormState extends State<PostEditorForm> {
   void initState() {
     super.initState();
     _titleController = TextEditingController(text: widget.initialTitle ?? '');
-    _contentController = TextEditingController(text: widget.initialContent ?? '');
+    _contentController =
+        TextEditingController(text: widget.initialContent ?? '');
     _imageFiles = [];
     _documentFiles = [];
     _authProvider = widget.authProvider;
     _selectInfoProvider = widget.selectInfoProvider;
-    
+
     // Provider 참조 저장
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -77,17 +77,14 @@ class _PostEditorFormState extends State<PostEditorForm> {
         _pageStateProvider?.setEditing(true);
       }
     });
-    
+
     // 선택정보(사업소, 직책, 급수) Provider에서 불러오기
     Future.microtask(() {
       if (mounted) {
-
         if (!_selectInfoProvider.loaded) _selectInfoProvider.loadAll();
-
       }
     });
 
-    
     // onFormReady 콜백 호출 (submitForm 메서드 전달)
     WidgetsBinding.instance.addPostFrameCallback((_) {
       widget.onFormReady?.call(_submit);
@@ -120,7 +117,6 @@ class _PostEditorFormState extends State<PostEditorForm> {
 
   // 사업소 선택 옵션 생성 메서드
   List<Map<String, String>> _getBranchOptions(BuildContext context) {
-
     // if (!selectInfo.loaded) return [];
     debugPrint('selectInfo: ${_selectInfoProvider.branches}');
     debugPrint('authProvider: ${_authProvider.appUser?.affiliation}');
@@ -150,7 +146,6 @@ class _PostEditorFormState extends State<PostEditorForm> {
 
   // 자동으로 설정될 사업소 결정
   String _getAutoBranch(BuildContext context) {
-
     if (_authProvider.isAdmin) {
       return _selectedBranch ?? '전체';
     }
@@ -166,16 +161,20 @@ class _PostEditorFormState extends State<PostEditorForm> {
   void _submit() async {
     if (_formKey.currentState?.validate() ?? false) {
       context.read<LoadingProvider>().setLoading(true,
-          text: widget.type == 'notice'
+          text: widget.type == MenuType.notice
               ? '공지사항 등록 중...'
-              : widget.type == 'board'
+              : widget.type == MenuType.board
                   ? '게시글 등록 중...'
-                  : '등록 중...');
+                  : widget.type == MenuType.anonymousBoard
+                      ? '익명게시글 등록 중...'
+                      : widget.type == MenuType.dataRequest
+                          ? '자료요청 등록 중...'
+                          : '등록 중...');
       try {
         // 파일들을 업로드하고 URL/파일명 목록 생성
         List<Map<String, String>> imageList = [];
         List<Map<String, String>> fileList = [];
-        
+
         // 이미지 파일들 업로드
         for (final fileInfo in _imageFiles) {
           try {
@@ -205,7 +204,7 @@ class _PostEditorFormState extends State<PostEditorForm> {
             return;
           }
         }
-        
+
         // 문서 파일들 업로드
         for (final fileInfo in _documentFiles) {
           try {
@@ -236,8 +235,12 @@ class _PostEditorFormState extends State<PostEditorForm> {
           }
         }
 
-        widget.onSubmit(_titleController.text.trim(),
-              _contentController.text.trim(), imageList, fileList, _selectedBranch ?? '');
+        widget.onSubmit(
+            _titleController.text.trim(),
+            _contentController.text.trim(),
+            imageList,
+            fileList,
+            _selectedBranch ?? '');
         _pageStateProvider?.setUnsavedChanges(false);
       } catch (e) {
         debugPrint('제출 실패: $e');
@@ -266,10 +269,11 @@ class _PostEditorFormState extends State<PostEditorForm> {
                   decoration: const InputDecoration(labelText: '사업소'),
                   value: _selectedBranch,
                   items: branchOptions
-                      .map<DropdownMenuItem<String>>((b) => DropdownMenuItem<String>(
-                            value: b['name'],
-                            child: Text(b['name'] ?? ''),
-                          ))
+                      .map<DropdownMenuItem<String>>(
+                          (b) => DropdownMenuItem<String>(
+                                value: b['name'],
+                                child: Text(b['name'] ?? ''),
+                              ))
                       .toList(),
                   onChanged: (value) {
                     debugPrint('사업소 선택: $value');
@@ -301,11 +305,15 @@ class _PostEditorFormState extends State<PostEditorForm> {
 
   @override
   Widget build(BuildContext context) {
-            // 자동으로 설정될 사업소 결정
-        _selectedBranch = _getAutoBranch(context);
 
-        // 사업소 선택 옵션 생성
-        branchOptions = _getBranchOptions(context);
+    final _type = widget.type;
+    if (_type == MenuType.notice) {
+      // 자동으로 설정될 사업소 결정
+      _selectedBranch = _getAutoBranch(context);
+
+      // 사업소 선택 옵션 생성
+      branchOptions = _getBranchOptions(context);
+    }
 
     return SingleChildScrollView(
       child: Form(
@@ -314,9 +322,10 @@ class _PostEditorFormState extends State<PostEditorForm> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // 사업소 선택 (별도 행)
-             _buildBranchSelector(branchOptions, _selectedBranch ?? ''),
+            _type == MenuType.notice ?
+            _buildBranchSelector(branchOptions, _selectedBranch ?? ''): Container(),
             const SizedBox(height: 4),
-            
+
             // 제목 입력
             TextFormField(
               controller: _titleController,
@@ -409,7 +418,7 @@ class _PostEditorFormState extends State<PostEditorForm> {
                   itemBuilder: (context, idx) {
                     final fileInfo = _imageFiles[idx];
                     final isHovered = _hoveredImageIndex == idx;
-                    
+
                     return MouseRegion(
                       cursor: SystemMouseCursors.click,
                       onEnter: (_) {
@@ -514,7 +523,8 @@ class _PostEditorFormState extends State<PostEditorForm> {
                           trailing: IconButton(
                             icon: const Icon(Icons.close, size: 18),
                             onPressed: () {
-                              setState(() => _documentFiles.removeAt(entry.key));
+                              setState(
+                                  () => _documentFiles.removeAt(entry.key));
                             },
                           ),
                         )),
