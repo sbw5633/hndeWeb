@@ -1,0 +1,63 @@
+name: hnde_web
+description: "A new Flutter project."
+publish_to: 'none'  
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.5.3
+
+dependencies:
+  flutter:
+    sdk: flutter
+  go_router: ^13.2.0
+  firebase_core: ^2.25.4
+  firebase_auth: ^4.17.4
+  cloud_firestore: ^4.15.4
+  # 기타 필요한 패키지
+  # lucide_icons는 pub.dev에 없으므로 material_icons만 우선 사용
+  equatable: ^2.0.5
+  uuid: ^4.3.3
+
+
+  # The following adds the Cupertino Icons font to your application.
+  # Use with the CupertinoIcons class for iOS style icons.
+  cupertino_icons: ^1.0.8
+  image_picker: ^1.1.2
+  provider: ^6.1.5
+  js: ^0.6.7
+
+  http: ^0.13.6
+  aws_s3_upload: ^1.5.0
+  crypto: ^3.0.3
+  
+  # 환경변수 지원
+  flutter_dotenv: ^5.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+
+  flutter_lints: ^4.0.0
+
+flutter:
+
+
+  uses-material-design: true
+
+
+  assets:
+    - assets/fonts/
+    - assets/images/
+
+
+
+
+
+  fonts:
+    - family: NotoSansKR
+      fonts:
+        - asset: assets/fonts/NotoSansKR-Regular.otf
+        - asset: assets/fonts/NotoSansKR-Bold.otf
+
+
