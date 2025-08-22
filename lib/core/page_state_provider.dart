@@ -4,7 +4,7 @@ class PageStateProvider extends ChangeNotifier {
   bool _isEditing = false;
   bool _hasUnsavedChanges = false;
   String _currentPage = '';
-
+  VoidCallback? _submitFormCallback;
   bool get isEditing => _isEditing;
   bool get hasUnsavedChanges => _hasUnsavedChanges;
   String get currentPage => _currentPage;
@@ -24,10 +24,22 @@ class PageStateProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+    /// 폼 제출 콜백 설정 (추가)
+  void setSubmitFormCallback(VoidCallback? callback) {
+    _submitFormCallback = callback;
+    notifyListeners();
+  }
+
+  /// 저장된 폼 제출 콜백 실행 (추가)
+  void executeSubmitFormCallback() {
+    _submitFormCallback?.call();
+  }
+
   void clearState() {
     _isEditing = false;
     _hasUnsavedChanges = false;
     _currentPage = '';
+    _submitFormCallback = null;
     notifyListeners();
   }
 
@@ -40,6 +52,7 @@ class PageStateProvider extends ChangeNotifier {
       _isEditing = false;
       _hasUnsavedChanges = false;
       _currentPage = '';
+      _submitFormCallback = null;
     }
   }
 } 
