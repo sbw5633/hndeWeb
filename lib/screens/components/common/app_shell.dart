@@ -6,6 +6,7 @@ import '../../../core/loading_provider.dart';
 import '../sidebar/sidebar.dart';
 import '../sidebar/sidebar_menu_items.dart';
 import 'loading_widget.dart';
+import '../../../widgets/permission_guard.dart';
 
 class AppShell extends StatefulWidget {
   final Widget child;
@@ -20,37 +21,47 @@ class _AppShellState extends State<AppShell> {
 
   int _getSelectedMenuIndex(BuildContext context) {
     final location = GoRouterState.of(context).uri.toString();
-    var idx =
-        sidebarMenuItems.indexWhere((item) => location == item.routeName);
-            
-    // 글쓰기 페이지일 경우 해당 메뉴 선택 표시(공지사항, 게시판 등등)
-    if(location == '/write-notice') {
-      idx = sidebarMenuItems.indexWhere((item) => item.routeName == '/notices');
-    }
-    // 공지사항 상세 페이지일 경우 공지사항 메뉴 선택 표시
-    if(location.startsWith('/notices/')) {
-      idx = sidebarMenuItems.indexWhere((item) => item.routeName == '/notices');
-    }
-    if(location == '/write-board') {
-      idx = sidebarMenuItems.indexWhere((item) => item.routeName == '/boards');
-    }
-    if(location.startsWith('/boards/')) {
-      idx = sidebarMenuItems.indexWhere((item) => item.routeName == '/boards');
-    }
-    if(location == '/write-anonymous-board') {
-      idx = sidebarMenuItems.indexWhere((item) => item.routeName == '/anonymous-boards');
-    }
-    if(location.startsWith('/anonymous-boards/')) {
-      idx = sidebarMenuItems.indexWhere((item) => item.routeName == '/anonymous-boards');
-    }
-    if(location == '/write-data-request') {
-      idx = sidebarMenuItems.indexWhere((item) => item.routeName == '/data-requests');
-    }
-    if(location.startsWith('/data-requests/')) {
-      idx = sidebarMenuItems.indexWhere((item) => item.routeName == '/data-requests');
+    
+    // AppMenus를 사용해서 자동으로 매핑
+    for (int i = 0; i < sidebarMenuItems.length; i++) {
+      final item = sidebarMenuItems[i];
+      
+      // 기본 페이지 매칭
+      if (location == item.routeName || location.startsWith('${item.routeName}/')) {
+        return i;
+      }
+      
+      // 글쓰기 페이지 매칭
+      if (location == '/write-notice' && item.routeName == '/notices') return i;
+      if (location == '/write-board' && item.routeName == '/boards') return i;
+      if (location == '/write-anonymous-board' && item.routeName == '/anonymous-boards') return i;
+      if (location == '/write-data-request' && item.routeName == '/data-requests') return i;
     }
 
-    return idx >= 0 ? idx : 0;
+    return 0; // 기본값
+  }
+
+  MenuType _getMenuTypeFromRoute(String route) {
+    // AppMenus에서 자동으로 매핑
+    for (final menu in AppMenus.getAll()) {
+      // 기본 페이지 매칭
+      if (route == menu.route || route.startsWith('${menu.route}/')) {
+        return menu.type;
+      }
+    }
+    
+    // 글쓰기 페이지 매칭 (null 체크 추가)
+    if (route == '/write-notice') return MenuType.notice;
+    if (route == '/write-board') return MenuType.board;
+    if (route == '/write-anonymous-board') return MenuType.anonymousBoard;
+    if (route == '/write-data-request') return MenuType.dataRequest;
+    
+    // 기본값
+    return MenuType.dashboard;
+  }
+
+  bool _requiresWritePermission(String route) {
+    return route.startsWith('/write-') || route.startsWith('/admin');
   }
 
   void _handleSidebarMenuTap(BuildContext context, int idx) async {
@@ -95,6 +106,10 @@ class _AppShellState extends State<AppShell> {
   Widget build(BuildContext context) {
     final selectedMenu = _getSelectedMenuIndex(context);
     final loadingProvider = context.watch<LoadingProvider>();
+    final currentRoute = GoRouterState.of(context).uri.toString();
+    final menuType = _getMenuTypeFromRoute(currentRoute);
+    final requiresWrite = _requiresWritePermission(currentRoute);
+    
     return Stack(
       children: [
         Scaffold(
@@ -108,7 +123,11 @@ class _AppShellState extends State<AppShell> {
               ),
               // 메인 컨텐츠
               Expanded(
-                child: widget.child,
+                child: PermissionGuard(
+                  requiredPermission: menuType,
+                  requireWritePermission: requiresWrite,
+                  child: widget.child,
+                ),
               ),
             ],
           ),

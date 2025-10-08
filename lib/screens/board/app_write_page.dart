@@ -41,7 +41,7 @@ class _AppWritePageState extends State<AppWritePage> {
         child: Scaffold(
           appBar: WritePageAppBar(type: widget.type.toString()),
           body: Padding(
-            padding: const EdgeInsets.all(24.0),
+            padding: const EdgeInsets.all(4.0),
             child: PostEditorForm(
               authProvider: authProvider,
               selectInfoProvider: selectInfoProvider,
@@ -90,7 +90,7 @@ class _AppWritePageState extends State<AppWritePage> {
         content: content,
         authorId: currentUser.uid,
         authorName: currentUser.name,
-        type: type.toString(),
+        type: type,
         images: images,
         files: files,
         createdAt: DateTime.now(),
@@ -114,7 +114,24 @@ class _AppWritePageState extends State<AppWritePage> {
         );
         
         // 게시판 페이지로 이동
-        context.go('/board/${type.toString()}');
+        String routePath;
+        switch (type) {
+          case MenuType.notice:
+            routePath = '/notices';
+            break;
+          case MenuType.board:
+            routePath = '/boards';
+            break;
+          case MenuType.anonymousBoard:
+            routePath = '/anonymous-boards';
+            break;
+          case MenuType.dataRequest:
+            routePath = '/data-requests';
+            break;
+          default:
+            routePath = '/boards';
+        }
+        context.go(routePath);
       }
     } catch (e) {
       if (mounted) {

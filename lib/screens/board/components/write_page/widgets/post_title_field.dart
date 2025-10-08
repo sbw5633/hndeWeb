@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 class PostTitleField extends StatelessWidget {
   final TextEditingController controller;
-  final Function(bool) onContentChanged;
+  final VoidCallback onContentChanged;
 
   const PostTitleField({
     super.key,
@@ -17,9 +17,7 @@ class PostTitleField extends StatelessWidget {
       decoration: const InputDecoration(labelText: '제목'),
       validator: (v) =>
           (v == null || v.trim().isEmpty) ? '제목을 입력하세요.' : null,
-      onChanged: (_) {
-        onContentChanged(true);
-      },
+      onChanged: (_) => onContentChanged(),
       autovalidateMode: AutovalidateMode.onUserInteraction,
     );
   }

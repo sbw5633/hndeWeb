@@ -23,7 +23,8 @@ class AuthService {
         'name': name,
         'email': email,
         'affiliation': affiliation,
-        'role': 'employee',
+        'role': '사원',
+        'permissionLevel': 5, // PermissionLevel.employee
         'approved': false,
         'createdAt': now,
         'lastLoginAt': now,

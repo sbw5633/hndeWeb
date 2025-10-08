@@ -3,7 +3,10 @@ import 'package:go_router/go_router.dart';
 import '../../const_value.dart';
 import '../../models/board_post_model.dart';
 import '../../services/firebase/board_post_service.dart';
-import 'dart:html';
+import 'components/unified_post_card.dart';
+import 'components/comment_section.dart';
+import 'components/post_actions.dart';
+import '../board/components/data_request_response_section.dart';
 
 class BoardPostDetailPage extends StatefulWidget {
   final String postId;
@@ -81,14 +84,23 @@ class _BoardPostDetailPageState extends State<BoardPostDetailPage> {
       );
     }
 
-    return _BoardPostDetailContent(post: _post!, type: widget.type);
+    return _BoardPostDetailContent(
+      post: _post!, 
+      type: widget.type,
+      onRefresh: _loadPost,
+    );
   }
 }
 
 class _BoardPostDetailContent extends StatelessWidget {
   final BoardPost post;
   final MenuType type;
-  const _BoardPostDetailContent({required this.post, required this.type});
+  final VoidCallback? onRefresh;
+  const _BoardPostDetailContent({
+    required this.post, 
+    required this.type,
+    this.onRefresh,
+  });
 
   String getTitle() {
     switch (type) {
@@ -123,137 +135,15 @@ class _BoardPostDetailContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isAnonymous = post.anonymity;
     final isDataRequest = type == MenuType.dataRequest;
-    final authorName = isAnonymous ? '익명' : post.authorName;
-    final createdAt = post.createdAt;
-    final images = post.images;
-    final files = post.files;
-    final extra = post.extra;
-
-    // 파일 목록 빌드
-    Widget buildFileList() {
-      if (files.isEmpty) return const SizedBox();
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 16),
-          const Text('첨부 파일', style: TextStyle(fontWeight: FontWeight.bold)),
-          ...files.map((file) => ListTile(
-                leading: const Icon(Icons.insert_drive_file, color: Colors.grey),
-                title: Text(file['name'] ?? file['url']?.split('/').last ?? ''),
-                onTap: () {
-                  final url = file['url'] ?? '';
-                  final name = file['name'] ?? url.split('/').last;
-                  
-                  if (url.isNotEmpty) {
-                    try {
-                      
-                      // 다운로드 링크 생성
-                      final a = AnchorElement(href: url)
-                        ..download = name
-                        ..target = '_blank';
-                      document.body!.append(a);
-                      a.click();
-                      a.remove();
-                      
-                      // 성공 메시지 표시
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('$name 다운로드를 시작합니다.'),
-                          duration: const Duration(seconds: 2),
-                        ),
-                      );
-                    } catch (e) {
-                      // 실패 시 새 창에서 열기
-                      try {
-                        window.open(url, '_blank');
-                      } catch (_) {
-                        // 최종 실패 시 사용자에게 알림
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('파일 다운로드에 실패했습니다: $name'),
-                            backgroundColor: Colors.red,
-                            duration: const Duration(seconds: 3),
-                          ),
-                        );
-                      }
-                    }
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('파일 URL이 없습니다.'),
-                        backgroundColor: Colors.red,
-                        duration: Duration(seconds: 2),
-                      ),
-                    );
-                  }
-                },
-              )),
-        ],
-      );
-    }
-
-    // 이미지 목록 빌드
-    Widget buildImageList() {
-      if (images.isEmpty) return const SizedBox();
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 16),
-          const Text('첨부 이미지', style: TextStyle(fontWeight: FontWeight.bold)),
-          SizedBox(
-            height: 140,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: images.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
-              itemBuilder: (context, idx) {
-                final image = images[idx];
-                final url = image['url'] ?? '';
-                final fileName = image['name'] ?? url.split('/').last;
-                return _HoverImageWithOverlay(
-                  imageUrl: url,
-                  fileName: fileName,
-                );
-              },
-            ),
-          ),
-        ],
-      );
-    }
-
-    // 사업소별 제출 현황 빌드
-    Widget buildDataRequestStatus() {
-      if (!isDataRequest) return const SizedBox();
-      // 예시: extra['uploadStatus'] = [{branch: '본사', uploaded: true, fileUrl: ...}, ...]
-      final List<dynamic> statusList = extra['uploadStatus'] ?? [];
-      if (statusList.isEmpty) return const SizedBox();
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 24),
-          const Text('사업소별 제출 현황', style: TextStyle(fontWeight: FontWeight.bold)),
-          ...statusList.map((e) {
-            final branch = e['branch'] ?? '-';
-            final uploaded = e['uploaded'] == true;
-            final fileUrl = e['fileUrl'] ?? '';
-            return ListTile(
-              leading: Icon(uploaded ? Icons.check_circle : Icons.cancel, color: uploaded ? Colors.green : Colors.red),
-              title: Text(branch),
-              subtitle: uploaded && fileUrl != null ? Text('파일: ${fileUrl.split('/').last}') : null,
-              onTap: uploaded && fileUrl != null ? () {
-                // 파일 다운로드/미리보기 등 구현
-              } : null,
-            );
-          }),
-        ],
-      );
-    }
 
     return Scaffold(
+      backgroundColor: Colors.grey.shade50,
       appBar: AppBar(
         title: Text(getTitle()),
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black87,
+        elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.go(getRoute()),
@@ -262,138 +152,30 @@ class _BoardPostDetailContent extends StatelessWidget {
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 제목
-            Text(post.title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            // 작성자/일시
-            Row(
-              children: [
-                Text(authorName, style: const TextStyle(fontSize: 15, color: Colors.black87)),
-                const SizedBox(width: 12),
-                Text('${createdAt.year}.${createdAt.month.toString().padLeft(2, '0')}.${createdAt.day.toString().padLeft(2, '0')} ${createdAt.hour.toString().padLeft(2, '0')}:${createdAt.minute.toString().padLeft(2, '0')}', style: const TextStyle(fontSize: 14, color: Colors.grey)),
-              ],
-            ),
+            // 통합 게시물 카드 (제목, 작성자, 본문, 첨부파일)
+            UnifiedPostCard(post: post, type: type),
+            const SizedBox(height: 16),
+            
+            // 게시물 액션 (좋아요, 댓글수, 조회수)
+            PostActions(post: post),
             const SizedBox(height: 24),
-            // 본문
-            Text(post.content, style: const TextStyle(fontSize: 16)),
-            buildImageList(),
-            buildFileList(),
-            buildDataRequestStatus(),
-            // TODO: 댓글 등 추가 가능
+            
+            // 자료요청일 때 사업소별 회신 현황 표시
+            if (isDataRequest)
+              DataRequestResponseSection(
+                post: post,
+                onResponseDeleted: (branchName) {
+                  onRefresh?.call();
+                },
+              ),
+            
+            // 댓글 섹션
+            if (isDataRequest) const SizedBox(height: 24),
+            CommentSection(postId: post.id),
           ],
         ),
       ),
     );
   }
 }
-
-// 이미지 hover 오버레이 위젯
-class _HoverImageWithOverlay extends StatefulWidget {
-  final String imageUrl;
-  final String fileName;
-  const _HoverImageWithOverlay({required this.imageUrl, required this.fileName});
-  @override
-  State<_HoverImageWithOverlay> createState() => _HoverImageWithOverlayState();
-}
-class _HoverImageWithOverlayState extends State<_HoverImageWithOverlay> {
-  bool _hovered = false;
-  @override
-  Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        onTap: () {
-          final url = widget.imageUrl;
-          final name = widget.fileName;
-          
-          if (url.isNotEmpty) {
-            try {
-              // 다운로드 링크 생성
-              final a = AnchorElement(href: url)
-                ..download = name
-                ..target = '_blank';
-              document.body!.append(a);
-              a.click();
-              a.remove();
-              
-              // 성공 메시지 표시
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('$name 다운로드를 시작합니다.'),
-                  duration: const Duration(seconds: 2),
-                ),
-              );
-            } catch (e) {
-              // 실패 시 새 창에서 열기
-              try {
-                window.open(url, '_blank');
-              } catch (_) {
-                // 최종 실패 시 사용자에게 알림
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('이미지 다운로드에 실패했습니다: $name'),
-                    backgroundColor: Colors.red,
-                    duration: const Duration(seconds: 3),
-                  ),
-                );
-              }
-            }
-          } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('이미지 URL이 없습니다.'),
-                backgroundColor: Colors.red,
-                duration: Duration(seconds: 2),
-              ),
-            );
-          }
-        },
-        child: Stack(
-          children: [
-            Container(
-              width: 140,
-              height: 140,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey.shade300),
-              ),
-              clipBehavior: Clip.hardEdge,
-              child: Image.network(
-                widget.imageUrl,
-                width: 140,
-                height: 140,
-                fit: BoxFit.contain,
-              ),
-            ),
-            const SizedBox(height: 8),
-            if (_hovered)
-              Positioned.fill(
-                child: Container(
-                  color: Colors.black.withValues(alpha: 0.5),
-                  child: Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Text(
-                        widget.fileName,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13,
-                        ),
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-} 

@@ -25,7 +25,7 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (!widget.currentUser.isMainAdmin) {
+    if (widget.currentUser.permissionLevel != PermissionLevel.appAdmin) {
       return const Scaffold(
         body: Center(child: Text('접근 권한이 없습니다.')),
       );

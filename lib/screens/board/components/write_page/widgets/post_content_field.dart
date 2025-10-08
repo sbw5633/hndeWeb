@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 class PostContentField extends StatelessWidget {
   final TextEditingController controller;
-  final Function(bool) onContentChanged;
+  final VoidCallback onContentChanged;
 
   const PostContentField({
     super.key,
@@ -18,9 +18,7 @@ class PostContentField extends StatelessWidget {
       maxLines: 8,
       validator: (v) =>
           (v == null || v.trim().isEmpty) ? '내용을 입력하세요.' : null,
-      onChanged: (_) {
-        onContentChanged(true);
-      },
+      onChanged: (_) => onContentChanged(),
       autovalidateMode: AutovalidateMode.onUserInteraction,
     );
   }
