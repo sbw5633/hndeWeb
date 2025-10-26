@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../tools/tool_navigator.dart';
+import '../models/tool_definition.dart';
 
 class PDFMasterTab extends StatefulWidget {
   const PDFMasterTab({super.key});
@@ -55,6 +57,7 @@ class _PDFMasterTabState extends State<PDFMasterTab> {
           title: 'PDF 합치기',
           subtitle: '여러 PDF 파일을 하나로 병합',
           gradient: [Colors.red.shade400, Colors.red.shade600],
+          onTap: () => ToolNavigator.navigateToTool(context, ToolType.pdfMerge),
         ),
         _buildToolCard(
           icon: Icons.content_cut,
@@ -321,14 +324,13 @@ class _PDFMasterTabState extends State<PDFMasterTab> {
     required String subtitle,
     required List<Color> gradient,
     bool isNew = false,
+    VoidCallback? onTap,
   }) {
     return Card(
       elevation: 1,
       margin: const EdgeInsets.only(bottom: 8),
       child: InkWell(
-        onTap: () {
-          // TODO: 각 도구 페이지로 이동
-        },
+        onTap: onTap,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(16),
