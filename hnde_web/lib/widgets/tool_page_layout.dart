@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 /// 공통 도구 페이지 레이아웃
 class ToolPageLayout extends StatelessWidget {
-  final IconData icon;
   final String title;
   final String description;
   final Color color;
@@ -12,7 +11,6 @@ class ToolPageLayout extends StatelessWidget {
 
   const ToolPageLayout({
     super.key,
-    required this.icon,
     required this.title,
     required this.description,
     required this.color,
@@ -31,53 +29,20 @@ class ToolPageLayout extends StatelessWidget {
         children: [
           Column(
             children: [
-              // 헤더 섹션
-              Card(
-                margin: const EdgeInsets.all(16),
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    children: [
-                      Icon(
-                        icon,
-                        size: 64,
-                        color: color,
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        title,
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        description,
-                        style: TextStyle(
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+              // 컨텐츠 (메인뷰가 위쪽)
+              Expanded(child: content),
               
-              // 액션 버튼들
+              // 액션 버튼들 (하단)
               if (actions.isNotEmpty) ...[
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                Container(
+                  padding: const EdgeInsets.all(16),
                   child: Wrap(
                     spacing: 8,
                     runSpacing: 8,
                     children: actions,
                   ),
                 ),
-                const SizedBox(height: 16),
               ],
-              
-              // 컨텐츠
-              Expanded(child: content),
             ],
           ),
           

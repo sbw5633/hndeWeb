@@ -1,0 +1,5 @@
+[33m77aeb26[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m Refactor: Move AWS credentials to environment variables for security
+[33m93a95b9[m[33m ([m[1;32mdevelop[m[33m)[m 각 게시판 작성페이지 통합. 컴포넌트 화 전 백업
+[33m9df3d8c[m 검색/필터 기능 추가 및 파일 업로드/다운로드 개선
+[33me908688[m 7/17까지 완료건
+[33mb0bbf2a[m 업로드

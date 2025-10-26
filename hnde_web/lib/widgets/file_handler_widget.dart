@@ -1,6 +1,7 @@
 import 'dart:html' as html;
 import 'dart:async';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 
 /// 파일 처리 관련 공통 기능을 제공하는 위젯
 class FileHandlerWidget {
@@ -52,26 +53,27 @@ class FileHandlerWidget {
       final files = uploadInput.files;
       if (files != null && files.isNotEmpty) {
         final fileDataList = <FileData>[];
-        int processedCount = 0;
         
         for (int i = 0; i < files.length; i++) {
           final file = files[i];
           final reader = html.FileReader();
-          final fileCompleter = Completer<void>();
+          final fileCompleter = Completer<Uint8List>();
           
           reader.onLoadEnd.listen((e) {
-            fileCompleter.complete();
+            fileCompleter.complete(Uint8List.fromList(reader.result as List<int>));
           });
           
           reader.readAsArrayBuffer(file);
-          await fileCompleter.future;
           
-          fileDataList.add(FileData(
-            data: Uint8List.fromList(reader.result as List<int>),
-            fileName: file.name,
-          ));
-          
-          processedCount++;
+          try {
+            final data = await fileCompleter.future;
+            fileDataList.add(FileData(
+              data: data,
+              fileName: file.name,
+            ));
+          } catch (e) {
+            debugPrint('파일 읽기 오류: $e');
+          }
         }
         
         completer.complete(fileDataList);
@@ -92,7 +94,7 @@ class FileHandlerWidget {
   }) {
     final blob = html.Blob([data], mimeType);
     final url = html.Url.createObjectUrlFromBlob(blob);
-    final anchor = html.AnchorElement(href: url)
+    html.AnchorElement(href: url)
       ..setAttribute('download', fileName)
       ..click();
     html.Url.revokeObjectUrl(url);
