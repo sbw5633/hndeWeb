@@ -8,6 +8,7 @@ class SearchFilterWidget extends StatefulWidget {
   final Function(String) onBranchChanged;
   final String initialSearchQuery;
   final String initialSelectedBranch;
+  final Color backgroundColor;
   final bool showBranchFilter;
 
   const SearchFilterWidget({
@@ -18,6 +19,7 @@ class SearchFilterWidget extends StatefulWidget {
     this.initialSearchQuery = '',
     this.initialSelectedBranch = '모든 사업소',
     this.showBranchFilter = true,
+    this.backgroundColor = const Color(0xFFD0E8F2),
   });
 
   @override
@@ -76,7 +78,7 @@ class _SearchFilterWidgetState extends State<SearchFilterWidget> {
         return Container(
           padding: const EdgeInsets.all(16.0),
           decoration: BoxDecoration(
-            color: Colors.grey.shade50,
+            color: widget.backgroundColor,
             border: Border(
               bottom: BorderSide(color: Colors.grey.shade300),
             ),

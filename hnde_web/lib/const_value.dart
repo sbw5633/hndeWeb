@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-const String kLogoHorizontal = 'assets/images/logo.horizontal.png';
+const String kLogoHorizontal = 'assets/images/logo_horizontal.png';
 const String kLogoVertical = 'assets/images/logo_vertical.png';
 
 enum MenuType {

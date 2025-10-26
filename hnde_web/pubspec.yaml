@@ -29,9 +29,13 @@ dependencies:
   http: ^0.13.6
   aws_s3_upload: ^1.5.0
   crypto: ^3.0.3
-  
-  # 환경변수 지원
-  flutter_dotenv: ^5.1.0
+  table_calendar: ^3.2.0
+  flutter_localizations:
+    sdk: flutter
+  # PDF & Image processing
+  pdf: ^3.11.1
+  image: ^4.1.7
+  path_provider: ^2.1.4
 
 dev_dependencies:
   flutter_test:

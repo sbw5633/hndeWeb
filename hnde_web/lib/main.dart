@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'firebase_options.dart';
 import 'app.dart';
+import 'services/firebase/post_stats_service.dart';
 
 void main() async {
   // 환경변수 로드
-  await dotenv.load(fileName: ".env");
   
   WidgetsFlutterBinding.ensureInitialized();
   
@@ -26,6 +25,9 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  
+  // PostStatsService 초기화 (전체 통계 캐싱)
+  PostStatsService.initializeStats();
   
   // 임시 관리자 계정 생성 (개발용)
   // await _createTemporaryAdmin();

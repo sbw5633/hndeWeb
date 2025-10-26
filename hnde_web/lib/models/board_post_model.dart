@@ -1,12 +1,13 @@
 import 'package:equatable/equatable.dart';
+import '../const_value.dart';
 
 /// 게시물 모델 (공지, 일반, 익명, 자료취합 등 확장 가능)
 class BoardPost extends Equatable {
   /// 문서 ID
   final String id;
 
-  /// 게시물 타입 ('notice', 'post', 'anonymous', 'gathering' 등)
-  final String type;
+  /// 게시물 타입
+  final MenuType type;
 
   /// 제목
   final String title;
@@ -41,6 +42,9 @@ class BoardPost extends Equatable {
   /// 좋아요 수
   final int likes;
 
+  /// 좋아요한 사용자 ID 목록
+  final List<String> likedBy;
+
   /// 댓글 수
   final int commentsCount;
 
@@ -49,6 +53,9 @@ class BoardPost extends Equatable {
 
   /// 대상 사업소 (이제는 String 또는 Map 등 서버 데이터 기반)
   final String targetGroup;
+
+  /// 사업소별 회신 데이터 (자료요청용)
+  final Map<String, dynamic> responses;
 
   const BoardPost({
     required this.id,
@@ -64,16 +71,34 @@ class BoardPost extends Equatable {
     required this.files,
     required this.views,
     required this.likes,
+    this.likedBy = const [],
     required this.commentsCount,
     required this.extra,
     required this.targetGroup,
+    this.responses = const {},
   });
 
   /// JSON → BoardPost
   factory BoardPost.fromJson(Map<String, dynamic> json, {String? id}) {
+    // 문자열 타입을 MenuType enum으로 변환
+    MenuType parseType(String? typeString) {
+      switch (typeString) {
+        case 'notice':
+          return MenuType.notice;
+        case 'board':
+          return MenuType.board;
+        case 'anonymousBoard':
+          return MenuType.anonymousBoard;
+        case 'dataRequest':
+          return MenuType.dataRequest;
+        default:
+          return MenuType.board;
+      }
+    }
+
     return BoardPost(
       id: id ?? json['id'] as String? ?? '',
-      type: json['type'] as String? ?? 'post',
+      type: parseType(json['type'] as String?),
       title: json['title'] as String? ?? '',
       content: json['content'] as String? ?? '',
       authorId: json['authorId'] as String? ?? '',
@@ -89,17 +114,35 @@ class BoardPost extends Equatable {
       files: (json['files'] as List?)?.map((e) => e is Map<String, dynamic> ? e.map((k, v) => MapEntry(k, v.toString())) : {'url': e.toString(), 'name': ''}).toList() ?? const [],
       views: json['views'] as int? ?? 0,
       likes: json['likes'] as int? ?? 0,
+      likedBy: List<String>.from(json['likedBy'] ?? []),
       commentsCount: json['commentsCount'] as int? ?? 0,
       extra: (json['extra'] as Map<String, dynamic>?) ?? <String, dynamic>{},
       targetGroup: json['targetGroup'] as String? ?? '',
+      responses: (json['responses'] as Map<String, dynamic>?) ?? <String, dynamic>{},
     );
   }
 
   /// BoardPost → JSON
   Map<String, dynamic> toJson() {
+    // MenuType enum을 문자열로 변환
+    String typeToString(MenuType menuType) {
+      switch (menuType) {
+        case MenuType.notice:
+          return 'notice';
+        case MenuType.board:
+          return 'board';
+        case MenuType.anonymousBoard:
+          return 'anonymousBoard';
+        case MenuType.dataRequest:
+          return 'dataRequest';
+        default:
+          return 'board';
+      }
+    }
+
     return {
       'id': id,
-      'type': type,
+      'type': typeToString(type),
       'title': title,
       'content': content,
       'authorId': authorId,
@@ -111,16 +154,18 @@ class BoardPost extends Equatable {
       'files': files,
       'views': views,
       'likes': likes,
+      'likedBy': likedBy,
       'commentsCount': commentsCount,
       'extra': extra,
       'targetGroup': targetGroup,
+      'responses': responses,
     };
   }
 
   /// 복사본 생성 (필드 일부만 변경)
   BoardPost copyWith({
     String? id,
-    String? type,
+    MenuType? type,
     String? title,
     String? content,
     String? authorId,
@@ -132,9 +177,11 @@ class BoardPost extends Equatable {
     List<Map<String, String>>? files,
     int? views,
     int? likes,
+    List<String>? likedBy,
     int? commentsCount,
     Map<String, dynamic>? extra,
     String? targetGroup,
+    Map<String, dynamic>? responses,
   }) {
     return BoardPost(
       id: id ?? this.id,
@@ -150,9 +197,11 @@ class BoardPost extends Equatable {
       files: files ?? this.files,
       views: views ?? this.views,
       likes: likes ?? this.likes,
+      likedBy: likedBy ?? this.likedBy,
       commentsCount: commentsCount ?? this.commentsCount,
       extra: extra ?? this.extra,
       targetGroup: targetGroup ?? this.targetGroup,
+      responses: responses ?? this.responses,
     );
   }
 
@@ -171,8 +220,10 @@ class BoardPost extends Equatable {
         files,
         views,
         likes,
+        likedBy,
         commentsCount,
         extra,
         targetGroup,
+        responses,
       ];
 } 

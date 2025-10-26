@@ -68,4 +68,5 @@ class BoardPostService {
     if (!doc.exists) return null;
     return BoardPost.fromJson(doc.data()!, id: doc.id);
   }
+
 } 

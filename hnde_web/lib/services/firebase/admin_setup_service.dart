@@ -24,9 +24,9 @@ class AdminSetupService {
         name: '관리자',
         email: 'admin@hnde.com',
         affiliation: '본사',
-        role: 'main_admin',
+        role: '관리자',
+        permissionLevel: PermissionLevel.appAdmin,
         approved: true,
-        isMainAdmin: true,
         createdAt: DateTime.now(),
         lastLoginAt: DateTime.now(),
       );

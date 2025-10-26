@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
+import 'work_master_page.dart';
+
 class WorkPage extends StatelessWidget {
   const WorkPage({super.key});
+
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(child: Text('업무기능(임시 페이지)')),
-    );
+    return const WorkMasterPage();
   }
 } 

@@ -4,31 +4,81 @@ class NoticeCard extends StatelessWidget {
   final String title;
   final String summary;
   final VoidCallback? onDetail;
-  const NoticeCard({required this.title, required this.summary, this.onDetail, super.key});
+  final VoidCallback? onTap;
+  final bool isDataRequest;
+  
+  const NoticeCard({
+    required this.title, 
+    required this.summary, 
+    this.onDetail,
+    this.onTap,
+    this.isDataRequest = false,
+    super.key
+  });
 
   @override
   Widget build(BuildContext context) {
     return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      elevation: 2,
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF336699))),
-            const SizedBox(height: 12),
-            Text(summary, style: const TextStyle(fontSize: 16, color: Colors.black87)),
-            const Spacer(),
-            Align(
-              alignment: Alignment.bottomRight,
-              child: TextButton(
-                onPressed: onDetail,
-                child: const Text('상세보기', style: TextStyle(color: Color(0xFF4DA3D2))),
-              ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      elevation: 4,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(20.0),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isDataRequest 
+                  ? [Colors.green.shade50, Colors.green.shade100]
+                  : [Colors.blue.shade50, Colors.blue.shade100],
             ),
-          ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    isDataRequest ? Icons.file_present : Icons.announcement,
+                    color: isDataRequest ? Colors.green.shade600 : Colors.blue.shade600,
+                    size: 24,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      title.length > 10 
+                          ? '${title.substring(0, 10)}...' 
+                          : title, 
+                      style: TextStyle(
+                        fontSize: 18, 
+                        fontWeight: FontWeight.bold, 
+                        color: isDataRequest ? Colors.green.shade800 : Colors.blue.shade800
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                summary, 
+                style: TextStyle(
+                  fontSize: 14, 
+                  color: isDataRequest ? Colors.green.shade700 : Colors.blue.shade700,
+                  height: 1.4,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const Spacer(),
+             
+            ],
+          ),
         ),
       ),
     );
