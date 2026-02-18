@@ -11,6 +11,7 @@ import '../models/ci_info.dart';
 import '../models/home_page_config.dart';
 import '../models/manufacturing_business.dart';
 import '../models/food_beverage_business.dart';
+import '../models/business_type.dart';
 import '../core/firestore_service.dart';
 import '../core/cache_manager.dart';
 
@@ -433,6 +434,61 @@ class DataService {
     return result;
   }
 
+  // 주요사업 타입 목록 가져오기
+  Future<List<BusinessType>> getBusinessTypeList({bool forceRefresh = false}) async {
+    const menuKey = 'business_types';
+    
+    // 캐시 확인 (강제 새로고침이 아니면)
+    if (!forceRefresh) {
+      final cached = _cache.get<List<BusinessType>>(menuKey);
+      if (cached != null) {
+        print('💾 주요사업 타입 캐시 사용');
+        return cached;
+      }
+    }
+    
+    final dataList = await _service.getCollection(
+      FirestoreCollections.businessTypes,
+      forceRefresh: forceRefresh,
+    );
+    
+    final result = dataList
+        .map((data) => BusinessType.fromFirestore(data, data['id'] as String))
+        .toList();
+    result.sort((a, b) => a.order.compareTo(b.order));
+    
+    _cache.set(menuKey, result);
+    _cache.markAsAccessed(menuKey);
+    return result;
+  }
+
+  // 동적 사업 데이터 가져오기
+  Future<Map<String, dynamic>?> getDynamicBusinessData(String businessTypeId, {bool forceRefresh = false}) async {
+    final menuKey = 'business_data_$businessTypeId';
+    
+    // 캐시 확인 (강제 새로고침이 아니면)
+    if (!forceRefresh) {
+      final cached = _cache.get<Map<String, dynamic>>(menuKey);
+      if (cached != null) {
+        print('💾 동적 사업 데이터 캐시 사용: $businessTypeId');
+        return cached;
+      }
+    }
+    
+    final data = await _service.getDocument(
+      FirestoreCollections.businessData,
+      businessTypeId,
+      forceRefresh: forceRefresh,
+    );
+    
+    if (data != null) {
+      _cache.set(menuKey, data);
+      _cache.markAsAccessed(menuKey);
+    }
+    
+    return data;
+  }
+
   /// 새로고침: 모든 캐시를 무효화하고 변경된 데이터만 업데이트
   /// 실제로는 모든 메뉴의 데이터를 다시 가져오지만, FirestoreService 레벨에서
   /// ETag 비교를 통해 변경된 것만 실제로 네트워크 요청을 수행합니다.
@@ -449,6 +505,7 @@ class DataService {
       'business_restarea',
       'business_manufacturing',
       'business_food',
+      'business_types',
       'community_notice',
       'pr_press',
       'pr_events',
@@ -484,6 +541,9 @@ class DataService {
             break;
           case 'business_food':
             await getFoodBeverageBusiness(forceRefresh: true);
+            break;
+          case 'business_types':
+            await getBusinessTypeList(forceRefresh: true);
             break;
           case 'community_notice':
             await getNoticeList(limit: 50, forceRefresh: true);

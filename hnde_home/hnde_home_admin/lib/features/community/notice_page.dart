@@ -17,6 +17,7 @@ class NoticePage extends ConsumerWidget {
     return userInfo.when(
       data: (user) {
         final isAdmin = user?.isAdmin ?? false;
+        final canEdit = (user?.isApproved ?? false) && isAdmin;
         
         return notices.when(
           data: (items) {
@@ -25,7 +26,7 @@ class NoticePage extends ConsumerWidget {
                 appBar: AppBar(
                   title: const Text('공지사항 관리'),
                   actions: [
-                    if (isAdmin)
+                    if (canEdit)
                       IconButton(
                         icon: const Icon(Icons.add),
                         onPressed: () => _showAddDialog(context, ref),
@@ -39,7 +40,7 @@ class NoticePage extends ConsumerWidget {
               appBar: AppBar(
                 title: const Text('공지사항 관리'),
                 actions: [
-                  if (isAdmin)
+                  if (canEdit)
                     IconButton(
                       icon: const Icon(Icons.add),
                       onPressed: () => _showAddDialog(context, ref),
@@ -48,7 +49,7 @@ class NoticePage extends ConsumerWidget {
               ),
               body: Column(
                 children: [
-                  if (!isAdmin)
+                  if (!isAdmin || !canEdit)
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(16),
@@ -59,7 +60,9 @@ class NoticePage extends ConsumerWidget {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              '휴게소 관리자는 공지사항을 조회만 할 수 있습니다.',
+                              isAdmin
+                                  ? '관리자 승인 후 수정할 수 있습니다.'
+                                  : '휴게소 관리자는 공지사항을 조회만 할 수 있습니다.',
                               style: TextStyle(color: Colors.orange[900]),
                             ),
                           ),
@@ -100,7 +103,7 @@ class NoticePage extends ConsumerWidget {
                                 if (item.author != null) Text('작성자: ${item.author}'),
                               ],
                             ),
-                            trailing: isAdmin
+                            trailing: canEdit
                                 ? Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [

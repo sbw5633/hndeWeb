@@ -14,13 +14,14 @@ class RestAreaPage extends ConsumerWidget {
     return userInfo.when(
       data: (user) {
         final isRestAreaManager = user?.isRestAreaManager ?? false;
+        final canEdit = user?.isApproved ?? false;
         
         return Scaffold(
           appBar: AppBar(
             title: const Text('휴게소 사업 관리'),
             actions: [
-              // 관리자만 추가 버튼 표시
-              if (!isRestAreaManager)
+              // 관리자만 추가 버튼 표시, 승인된 경우에만 수정 가능
+              if (!isRestAreaManager && canEdit)
                 IconButton(
                   icon: const Icon(Icons.add),
                   onPressed: () => Navigator.push(

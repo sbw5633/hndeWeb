@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -96,13 +96,84 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       // 로그인 성공 시 아이디 저장
       await _saveEmail();
       
+      // 사용자 정보 확인
+      final userInfo = await ref.read(currentUserInfoProvider.future);
+      
       if (mounted) {
+        // 승인되지 않은 경우 메시지 표시
+        if (userInfo != null && !userInfo.isApproved) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('관리자 승인이 필요합니다. 관리자에게 문의해주세요.'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 5),
+            ),
+          );
+        }
         context.go('/');
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('로그인 실패: ${e.toString()}')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _handleGoogleLogin() async {
+    setState(() => _isLoading = true);
+    
+    try {
+      await ref.read(authControllerProvider).signInWithGoogle();
+      
+      if (mounted) {
+        // Firestore에서 계정 확인 (휴게소 관리자 또는 메인관리자)
+        final email = firebaseAuth.currentUser?.email ?? '';
+        final firestoreService = FirestoreService();
+        final emailPrefix = email.replaceAll('.', '_').replaceAll('@', '_at_');
+        
+        final restAreaData = await firestoreService.getDocument(
+          FirestoreCollections.restAreaManagers,
+          emailPrefix,
+        );
+        final adminData = await firestoreService.getDocument(
+          FirestoreCollections.admins,
+          emailPrefix,
+        );
+        
+        // rest_area_managers에도 없고 admins(메인관리자)에도 없을 때만 계정생성으로
+        if (restAreaData == null && adminData == null) {
+          context.go('/account-creation', extra: {
+            'email': email,
+            'isGoogleAccount': true,
+          });
+          return;
+        }
+        
+        // 메인관리자(admins에 있음) 또는 휴게소 관리자 → 메인으로 이동
+        final userInfo = await ref.read(currentUserInfoProvider.future);
+        
+        if (userInfo != null && !userInfo.isApproved) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('관리자 승인이 필요합니다. 관리자에게 문의해주세요.'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 5),
+            ),
+          );
+        }
+        
+        context.go('/');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('구글 로그인 실패: ${e.toString()}')),
         );
       }
     } finally {
@@ -175,14 +246,24 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                     )
                   : const Text('로그인'),
             ),
+            const SizedBox(height: 12),
+            // 구글 로그인 버튼
+            OutlinedButton.icon(
+              onPressed: _isLoading ? null : _handleGoogleLogin,
+              icon: const Icon(Icons.g_mobiledata, size: 24),
+              label: const Text('구글로 로그인'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
             const SizedBox(height: 16),
-            // 임시: 휴게소 관리자 계정 생성 버튼
+            // 계정 생성 버튼
             OutlinedButton(
               onPressed: _isLoading ? null : _showCreateManagerDialog,
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.orange,
               ),
-              child: const Text('휴게소 관리자 계정 생성'),
+              child: const Text('계정 생성'),
             ),
           ],
         ),
@@ -215,7 +296,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                 controller: restAreaIdController,
                 decoration: const InputDecoration(
                   labelText: '관리자 ID',
-                  hintText: '예: mannam',
+                  hintText: '예: mannam (이메일 형식이 아닌 ID만 입력)',
+                  helperText: '이메일 형식이 아닌 ID만 입력하세요. @hnde.co.kr이 자동으로 추가됩니다.',
                 ),
               ),
               const SizedBox(height: 16),
@@ -246,7 +328,20 @@ class _LoginPageState extends ConsumerState<LoginPage> {
               }
 
               try {
-                final email = '${restAreaIdController.text}@hnde.co.kr';
+                // 관리자 ID에서 @가 포함되어 있으면 @ 이전 부분만 사용
+                final managerId = restAreaIdController.text.trim();
+                final cleanId = managerId.contains('@') 
+                    ? managerId.split('@')[0] 
+                    : managerId;
+                
+                if (cleanId.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('관리자 ID를 올바르게 입력해주세요')),
+                  );
+                  return;
+                }
+                
+                final email = '$cleanId@hnde.co.kr';
                 final password = passwordController.text;
 
                 // Firebase Auth에 계정 생성
@@ -260,13 +355,15 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                 await firestoreService.saveDocument(
                   'rest_area_managers',
                   {
-                    'restAreaName': restAreaNameController.text,
-                    'restAreaId': restAreaIdController.text,
+                    'restAreaName': restAreaNameController.text.trim(),
+                    'restAreaId': cleanId,
                     'email': email,
                     'role': 'rest_area_manager',
+                    'isApproved': false, // 승인 필요
+                    'isGoogleAccount': false,
                     'createdAt': DateTime.now().toIso8601String(),
                   },
-                  docId: restAreaIdController.text,
+                  docId: cleanId,
                 );
 
                 if (mounted) {

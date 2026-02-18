@@ -4,15 +4,18 @@ import '../models/business_category.dart';
 
 class ManufacturingBusinessPage extends StatelessWidget {
   final ManufacturingBusiness? data;
+  final String? title; // 동적 제목 지원
 
   const ManufacturingBusinessPage({
     super.key,
     this.data,
+    this.title,
   });
 
   @override
   Widget build(BuildContext context) {
     final displayData = data ?? ManufacturingBusiness.getDummyData();
+    final pageTitle = title ?? '제조유통사업'; // 동적 제목 또는 기본값
     
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 32),
@@ -22,7 +25,7 @@ class ManufacturingBusinessPage extends StatelessWidget {
           children: [
             // 제목
             Text(
-              '제조유통사업',
+              pageTitle,
               style: TextStyle(
                 fontSize: 32,
                 fontWeight: FontWeight.bold,

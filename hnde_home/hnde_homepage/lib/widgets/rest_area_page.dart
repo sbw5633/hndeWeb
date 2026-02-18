@@ -16,6 +16,8 @@ class RestAreaListPage extends StatefulWidget {
 
 class _RestAreaListPageState extends State<RestAreaListPage> {
   String? _selectedRestAreaId;
+  final ScrollController _restAreaScrollController = ScrollController();
+  final Map<String, GlobalKey> _restAreaChipKeys = {};
 
   @override
   void initState() {
@@ -24,6 +26,27 @@ class _RestAreaListPageState extends State<RestAreaListPage> {
     if (widget.restAreas.isNotEmpty) {
       _selectedRestAreaId = widget.restAreas.first.id;
     }
+
+    // 첫 빌드 후 선택된 휴게소 쪽으로 스크롤 정렬
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _selectedRestAreaId != null) {
+        final key = _restAreaChipKeys[_selectedRestAreaId!];
+        if (key?.currentContext != null) {
+          Scrollable.ensureVisible(
+            key!.currentContext!,
+            alignment: 0.4,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+          );
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _restAreaScrollController.dispose();
+    super.dispose();
   }
 
   @override
@@ -42,11 +65,21 @@ class _RestAreaListPageState extends State<RestAreaListPage> {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    // 화면 너비에 따라 패딩 조정: 좁을수록 패딩 최소화
+    final horizontalPadding = screenWidth < 600 
+        ? 8.0 
+        : (screenWidth * 0.05).clamp(16.0, 80.0); // 화면 폭의 5% 또는 최소 16px, 최대 80px
+    
     // 휴게소가 없는 경우
     if (widget.restAreas.isEmpty) {
       return Padding(
-        padding:
-            const EdgeInsets.only(left: 80, right: 80, top: 32, bottom: 32),
+        padding: EdgeInsets.only(
+          left: horizontalPadding,
+          right: horizontalPadding,
+          top: 32,
+          bottom: 32,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -73,61 +106,117 @@ class _RestAreaListPageState extends State<RestAreaListPage> {
     }
 
     return Padding(
-      padding: const EdgeInsets.only(left: 80, right: 80, top: 32, bottom: 32),
+      padding: EdgeInsets.only(
+        left: horizontalPadding,
+        right: horizontalPadding,
+        top: 32,
+        bottom: 32,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // 휴게소 선택 버튼들 (가로 스크롤 없이 Wrap 사용)
-          Wrap(
-            spacing: 16,
-            runSpacing: 16,
-            children: widget.restAreas.map((restArea) {
-              return GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _selectedRestAreaId = restArea.id;
-                  });
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 12,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _selectedRestAreaId == restArea.id
-                        ? Colors.orange
-                        : Colors.white,
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(
-                      color: _selectedRestAreaId == restArea.id
-                          ? Colors.orange
-                          : Colors.grey[300]!,
-                      width: _selectedRestAreaId == restArea.id ? 2 : 1,
-                    ),
-                    boxShadow: _selectedRestAreaId == restArea.id
-                        ? [
-                            BoxShadow(
-                              color: Colors.orange.withOpacity(0.25),
-                              blurRadius: 8,
-                              offset: const Offset(0, 4),
+          // 휴게소 선택 버튼들 (한 줄, 드래그로 좌우 스크롤)
+          LayoutBuilder(
+            builder: (context, constraints) {
+              // 각 휴게소별 키 준비 (스크롤 시 선택 항목을 안쪽으로 끌어오기 위함)
+              for (final restArea in widget.restAreas) {
+                _restAreaChipKeys.putIfAbsent(
+                  restArea.id,
+                  () => GlobalKey(),
+                );
+              }
+
+              return SizedBox(
+                height: 50, // 한 줄 높이 고정
+                width: constraints.maxWidth,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onHorizontalDragUpdate: (details) {
+                    if (!_restAreaScrollController.hasClients) return;
+                    final position = _restAreaScrollController.position;
+                    final min = position.minScrollExtent;
+                    final max = position.maxScrollExtent;
+                    final newOffset =
+                        (_restAreaScrollController.offset - details.delta.dx)
+                            .clamp(min, max)
+                            .toDouble();
+                    _restAreaScrollController.jumpTo(newOffset);
+                  },
+                  child: SingleChildScrollView(
+                    controller: _restAreaScrollController,
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: widget.restAreas.map((restArea) {
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 16),
+                          child: GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _selectedRestAreaId = restArea.id;
+                              });
+                              final key = _restAreaChipKeys[restArea.id];
+                              if (key?.currentContext != null) {
+                                Scrollable.ensureVisible(
+                                  key!.currentContext!,
+                                  alignment: 0.4,
+                                  duration:
+                                      const Duration(milliseconds: 250),
+                                  curve: Curves.easeOut,
+                                );
+                              }
+                            },
+                            child: Container(
+                              key: _restAreaChipKeys[restArea.id],
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 24,
+                                vertical: 12,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _selectedRestAreaId == restArea.id
+                                    ? Colors.orange
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(24),
+                                border: Border.all(
+                                  color: _selectedRestAreaId == restArea.id
+                                      ? Colors.orange
+                                      : Colors.grey[300]!,
+                                  width: _selectedRestAreaId == restArea.id
+                                      ? 2
+                                      : 1,
+                                ),
+                                boxShadow:
+                                    _selectedRestAreaId == restArea.id
+                                        ? [
+                                            BoxShadow(
+                                              color: Colors.orange
+                                                  .withOpacity(0.25),
+                                              blurRadius: 8,
+                                              offset: const Offset(0, 4),
+                                            ),
+                                          ]
+                                        : null,
+                              ),
+                              child: Text(
+                                restArea.name,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: _selectedRestAreaId == restArea.id
+                                      ? Colors.white
+                                      : Colors.blue[900],
+                                ),
+                              ),
                             ),
-                          ]
-                        : null,
-                  ),
-                  child: Text(
-                    restArea.name,
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: _selectedRestAreaId == restArea.id
-                          ? Colors.white
-                          : Colors.blue[900],
+                          ),
+                        );
+                      }).toList(),
                     ),
                   ),
                 ),
               );
-            }).toList(),
+            },
           ),
           const SizedBox(height: 24),
           // 선택된 휴게소만 표시
@@ -578,10 +667,10 @@ class _IntroTabState extends State<_IntroTab> {
                         ),
                       ),
                       // 지도
-                      Container(
-                        width: double.infinity,
-                        decoration: BoxDecoration(
-                          color: Colors.grey[200],
+          Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: Colors.grey[200],
                         ),
                         child: AspectRatio(
                           aspectRatio: 16 / 9,
@@ -599,8 +688,8 @@ class _IntroTabState extends State<_IntroTab> {
                   width: 300,
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey[300]!),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey[300]!),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withOpacity(0.1),
@@ -654,15 +743,15 @@ class _IntroTabState extends State<_IntroTab> {
                         height: 300,
                         decoration: BoxDecoration(
                           color: Colors.grey[200],
-                        ),
-                        child: ClipRRect(
+            ),
+            child: ClipRRect(
                           borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
                           child: MapView(address: widget.detail.mapAddress!),
-                        ),
+              ),
                       ),
                     ],
-                  ),
-                ),
+            ),
+          ),
         ],
         // 확장 가능한 추가 섹션들 (현황, 수상내역 등)
         ..._buildAdditionalSections(),
@@ -1121,22 +1210,22 @@ class _StatusItemCard extends StatelessWidget {
         children: [
           // 상단: 제목 (아이콘 포함)
           Row(
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  icon,
-                  color: Colors.blue[900],
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: Colors.blue[50],
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              icon,
+              color: Colors.blue[900],
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
                 child: Text(
                   title,
                   style: TextStyle(
@@ -1186,15 +1275,15 @@ class _StatusItemCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       content!,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey[700],
-                        height: 1.6,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey[700],
+                    height: 1.6,
                       ),
-                    ),
                   ),
+                ),
               ],
-            ),
+          ),
           ],
         ],
       ),

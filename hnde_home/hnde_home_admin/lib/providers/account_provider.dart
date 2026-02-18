@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/firestore_service.dart';
 import '../core/firebase.dart';
 import '../core/firestore_service.dart' as fs;
+import 'auth_provider.dart';
 
 // 계정 정보 모델
 class AccountInfo {
@@ -11,6 +12,8 @@ class AccountInfo {
   final String? restAreaName;
   final String? managerName; // 담당자명
   final String role; // 'admin' or 'rest_area_manager'
+  final bool isApproved; // 관리자 승인 여부
+  final bool isGoogleAccount; // 구글 계정 여부
 
   AccountInfo({
     required this.id,
@@ -19,6 +22,8 @@ class AccountInfo {
     this.restAreaName,
     this.managerName,
     required this.role,
+    this.isApproved = true, // 기본값은 true (기존 계정 호환성)
+    this.isGoogleAccount = false,
   });
 
   factory AccountInfo.fromFirestore(Map<String, dynamic> data, String id) {
@@ -29,6 +34,8 @@ class AccountInfo {
       restAreaName: data['restAreaName'] as String?,
       managerName: data['managerName'] as String?,
       role: data['role'] as String? ?? 'rest_area_manager',
+      isApproved: data['isApproved'] as bool? ?? true,
+      isGoogleAccount: data['isGoogleAccount'] as bool? ?? false,
     );
   }
 
@@ -39,6 +46,8 @@ class AccountInfo {
       'restAreaName': restAreaName,
       'managerName': managerName,
       'role': role,
+      'isApproved': isApproved,
+      'isGoogleAccount': isGoogleAccount,
     };
   }
 }
@@ -107,6 +116,30 @@ class AccountController {
   // 비밀번호 재설정 이메일 보내기
   Future<void> sendPasswordResetEmail(String email) async {
     await firebaseAuth.sendPasswordResetEmail(email: email);
+  }
+
+  /// 해당 계정을 메인관리자(admin)로 지정
+  Future<void> promoteToMainAdmin(AccountInfo account) async {
+    final adminData = {
+      'email': account.email,
+      'role': 'admin',
+      'isApproved': true,
+      'isGoogleAccount': account.isGoogleAccount,
+      if (account.managerName != null) 'managerName': account.managerName,
+    };
+    await _service.saveDocument(
+      fs.FirestoreCollections.admins,
+      adminData,
+      docId: account.id,
+    );
+    if (account.role == 'rest_area_manager') {
+      await _service.deleteDocument(
+        fs.FirestoreCollections.restAreaManagers,
+        account.id,
+      );
+    }
+    ref.invalidate(accountListProvider);
+    ref.invalidate(currentUserInfoProvider);
   }
 }
 

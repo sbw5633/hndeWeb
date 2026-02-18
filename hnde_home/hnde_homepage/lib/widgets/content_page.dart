@@ -20,6 +20,7 @@ import '../models/rest_area.dart';
 import '../models/manufacturing_business.dart';
 import '../models/food_beverage_business.dart';
 import '../models/recruitment.dart';
+import '../models/business_type.dart';
 
 class ContentPage extends StatelessWidget {
   final String menuId;
@@ -35,6 +36,76 @@ class ContentPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final dataService = DataService();
     final routeKey = '${menuId}_$subMenuId';
+    
+    // 동적 사업 타입 처리 (business_${businessTypeId})
+    if (menuId == 'business' && 
+        subMenuId != 'restarea' && 
+        subMenuId != 'manufacturing' && 
+        subMenuId != 'food') {
+      return FutureBuilder<List<BusinessType>>(
+        future: dataService.getBusinessTypeList(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError || !snapshot.hasData) {
+            return ImageTextPage(
+              imageUrl: null,
+              title: '사업 소개',
+              content: '데이터를 불러올 수 없습니다.',
+            );
+          }
+          
+          final businessType = snapshot.data!.firstWhere(
+            (bt) => bt.id == subMenuId,
+            orElse: () => BusinessType(
+              id: subMenuId,
+              name: '사업 소개',
+              layoutType: 'layout1',
+              order: 0,
+            ),
+          );
+          
+          // 동적 사업 데이터 로드
+          return FutureBuilder<Map<String, dynamic>?>(
+            future: dataService.getDynamicBusinessData(subMenuId),
+            builder: (context, dataSnapshot) {
+              if (dataSnapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              
+              final businessData = dataSnapshot.data;
+              if (businessData == null) {
+                // 데이터가 없으면 기본 페이지 표시
+                return ImageTextPage(
+                  imageUrl: null,
+                  title: businessType.name,
+                  content: businessType.description ?? '${businessType.name}에 대한 정보입니다.',
+                );
+              }
+              
+              final layoutType = businessData['layoutType'] as String? ?? businessType.layoutType;
+              
+              if (layoutType == 'layout1') {
+                // 제조유통사업 스타일
+                final business = ManufacturingBusiness.fromFirestore(businessData);
+                return ManufacturingBusinessPage(
+                  data: business,
+                  title: businessType.name, // 동적 제목 전달
+                );
+              } else {
+                // 식음료사업 스타일
+                final business = FoodBeverageBusiness.fromFirestore(businessData);
+                return FoodBeverageBusinessPage(
+                  data: business,
+                  title: businessType.name, // 동적 제목 전달
+                );
+              }
+            },
+          );
+        },
+      );
+    }
 
     // 타입에 따라 적절한 위젯 표시
     switch (routeKey) {

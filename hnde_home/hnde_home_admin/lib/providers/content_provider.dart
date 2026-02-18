@@ -10,6 +10,7 @@ import '../models/customer_story_submission.dart';
 import '../models/business_proposal_submission.dart';
 import '../models/manufacturing_business.dart';
 import '../models/food_beverage_business.dart';
+import '../models/business_type.dart';
 
 // 보도자료 Provider
 final pressReleaseListProvider =
@@ -334,6 +335,96 @@ class FoodBeverageBusinessController {
       docId: 'main',
     );
     ref.invalidate(foodBeverageBusinessProvider);
+  }
+}
+
+// 주요사업 타입 Provider
+final businessTypeListProvider =
+    FutureProvider.autoDispose<List<BusinessType>>((ref) async {
+  final service = FirestoreService();
+  final dataList =
+      await service.getCollection(FirestoreCollections.businessTypes);
+  final result = dataList
+      .map((data) => BusinessType.fromFirestore(data, data['id'] as String))
+      .toList();
+  // order 기준으로 정렬
+  result.sort((a, b) => a.order.compareTo(b.order));
+  return result;
+});
+
+final businessTypeControllerProvider =
+    Provider((ref) => BusinessTypeController(ref));
+
+class BusinessTypeController {
+  final Ref ref;
+  final FirestoreService _service = FirestoreService();
+
+  BusinessTypeController(this.ref);
+
+  Future<String> add(BusinessType item) async {
+    final docId = await _service.saveDocument(
+      FirestoreCollections.businessTypes,
+      item.toFirestore(),
+      docId: item.id.isNotEmpty ? item.id : null,
+    );
+    ref.invalidate(businessTypeListProvider);
+    return docId;
+  }
+
+  Future<void> update(BusinessType item) async {
+    await _service.updateDocument(
+      FirestoreCollections.businessTypes,
+      item.id,
+      item.toFirestore(),
+    );
+    ref.invalidate(businessTypeListProvider);
+  }
+
+  Future<void> delete(String id) async {
+    await _service.deleteDocument(FirestoreCollections.businessTypes, id);
+    // 사업 타입 삭제 시 해당 사업 데이터도 삭제
+    await _service.deleteDocument(FirestoreCollections.businessData, id);
+    ref.invalidate(businessTypeListProvider);
+  }
+}
+
+// 동적 사업 데이터 Provider
+final dynamicBusinessDataProvider = FutureProvider.family<Map<String, dynamic>?, String>(
+  (ref, businessTypeId) async {
+    final service = FirestoreService();
+    final data = await service.getDocument(
+      FirestoreCollections.businessData,
+      businessTypeId,
+    );
+    return data;
+  },
+);
+
+final dynamicBusinessDataControllerProvider =
+    Provider((ref) => DynamicBusinessDataController(ref));
+
+class DynamicBusinessDataController {
+  final Ref ref;
+  final FirestoreService _service = FirestoreService();
+
+  DynamicBusinessDataController(this.ref);
+
+  Future<void> save(String businessTypeId, String layoutType, Map<String, dynamic> data) async {
+    // businessTypeId를 docId로 사용하여 저장
+    await _service.saveDocument(
+      FirestoreCollections.businessData,
+      {
+        'layoutType': layoutType,
+        ...data,
+      },
+      docId: businessTypeId,
+    );
+    ref.invalidate(dynamicBusinessDataProvider(businessTypeId));
+  }
+
+  Future<void> delete(String businessTypeId) async {
+    await _service.deleteDocument(FirestoreCollections.businessData, businessTypeId);
+    ref.invalidate(dynamicBusinessDataProvider(businessTypeId));
   }
 }
 

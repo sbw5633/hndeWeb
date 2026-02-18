@@ -37,6 +37,7 @@ class _AccountManagementPageState
       body: userInfo.when(
         data: (currentUser) {
           final isAdmin = currentUser?.isAdmin ?? false;
+          final canEdit = currentUser?.isApproved ?? false;
 
           // 일반 관리자인 경우: 자신의 정보만 표시
           if (!isAdmin) {
@@ -80,13 +81,14 @@ class _AccountManagementPageState
                               labelText: '담당자명',
                               border: OutlineInputBorder(),
                             ),
+                            readOnly: !canEdit,
                             onChanged: (_) {
                               setState(() => _hasChanges = true);
                             },
                           ),
                           const SizedBox(height: 24),
                           FilledButton(
-                            onPressed: _hasChanges
+                            onPressed: canEdit && _hasChanges
                                 ? () => _saveMyAccount(myAccount)
                                 : null,
                             child: const Text('저장'),
@@ -193,6 +195,75 @@ class _AccountManagementPageState
                                         setState(() => _hasChanges = true);
                                       },
                                     ),
+                                    const SizedBox(height: 16),
+                                    // 승인 상태 표시 및 승인 버튼
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Container(
+                                            padding: const EdgeInsets.all(12),
+                                            decoration: BoxDecoration(
+                                              color: account.isApproved
+                                                  ? Colors.green[50]
+                                                  : Colors.orange[50],
+                                              borderRadius: BorderRadius.circular(8),
+                                              border: Border.all(
+                                                color: account.isApproved
+                                                    ? Colors.green
+                                                    : Colors.orange,
+                                              ),
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                Icon(
+                                                  account.isApproved
+                                                      ? Icons.check_circle
+                                                      : Icons.pending,
+                                                  color: account.isApproved
+                                                      ? Colors.green
+                                                      : Colors.orange,
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Text(
+                                                  account.isApproved
+                                                      ? '승인됨'
+                                                      : '승인 대기',
+                                                  style: TextStyle(
+                                                    color: account.isApproved
+                                                        ? Colors.green[900]
+                                                        : Colors.orange[900],
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                        if (!account.isApproved) ...[
+                                          const SizedBox(width: 8),
+                                          FilledButton.icon(
+                                            onPressed: () => _approveAccount(account),
+                                            icon: const Icon(Icons.check),
+                                            label: const Text('승인'),
+                                            style: FilledButton.styleFrom(
+                                              backgroundColor: Colors.green,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                    if (account.role != 'admin') ...[
+                                      const SizedBox(height: 12),
+                                      FilledButton.tonalIcon(
+                                        onPressed: () => _promoteToMainAdmin(account),
+                                        icon: const Icon(Icons.admin_panel_settings),
+                                        label: const Text('메인관리자로 지정'),
+                                        style: FilledButton.styleFrom(
+                                          backgroundColor: Colors.indigo[50],
+                                          foregroundColor: Colors.indigo[900],
+                                        ),
+                                      ),
+                                    ],
                                     const SizedBox(height: 16),
                                     OutlinedButton.icon(
                                       onPressed: () =>
@@ -396,6 +467,87 @@ class _AccountManagementPageState
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('이메일 전송 실패: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _approveAccount(AccountInfo account) async {
+    try {
+      final updated = AccountInfo(
+        id: account.id,
+        email: account.email,
+        restAreaId: account.restAreaId,
+        restAreaName: account.restAreaName,
+        managerName: account.managerName,
+        role: account.role,
+        isApproved: true,
+        isGoogleAccount: account.isGoogleAccount,
+      );
+
+      await ref.read(accountControllerProvider).updateAccount(updated);
+      
+      // 사용자 정보 새로고침
+      ref.invalidate(currentUserInfoProvider);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('계정이 승인되었습니다.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('승인 실패: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _promoteToMainAdmin(AccountInfo account) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('메인관리자 지정'),
+        content: Text(
+          '${account.email} 계정을 메인관리자로 지정하시겠습니까?\n해당 계정은 모든 메뉴와 계정관리(승인, 메인관리자 지정 등)를 사용할 수 있습니다.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('지정'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    try {
+      await ref.read(accountControllerProvider).promoteToMainAdmin(account);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('메인관리자로 지정되었습니다.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('지정 실패: $e'),
             backgroundColor: Colors.red,
           ),
         );

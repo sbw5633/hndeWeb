@@ -21,6 +21,8 @@ class FirestoreCollections {
   static const String admins = 'admins';
   static const String manufacturingBusiness = 'manufacturing_business';
   static const String foodBeverageBusiness = 'food_beverage_business';
+  static const String businessTypes = 'business_types';
+  static const String businessData = 'business_data'; // 동적 사업 데이터 저장용
 }
 
 // Firestore 서비스 기본 클래스

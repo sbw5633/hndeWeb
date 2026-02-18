@@ -6,6 +6,7 @@ import '../widgets/menu_section.dart';
 import '../widgets/home_sections/minimal_home_content.dart';
 import '../widgets/footer.dart';
 import '../models/menu_structure.dart';
+import '../services/data_service.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -16,9 +17,10 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final AutoScrollController _scrollController = AutoScrollController();
-  final List<MenuItem> _menus = MenuData.getMainMenus();
+  List<MenuItem> _menus = MenuData.getMainMenus();
   String? _selectedMenuId; // 선택된 메뉴 ID (null이면 홈)
   String? _selectedSubMenuId; // 선택된 서브메뉴 ID
+  final DataService _dataService = DataService();
 
   final List<List<Color>> _sectionGradients = [
     [const Color(0xFFF5F7FF), Colors.white], // Hero
@@ -42,8 +44,12 @@ class _HomePageState extends State<HomePage> {
   }) {
     final gradientColors = _getGradient(sectionIndex);
     final screenWidth = MediaQuery.of(context).size.width;
-    final isMobile = screenWidth < 768;
-    final horizontalPadding = isMobile ? 24.0 : 80.0;
+    
+    // 화면 폭이 좁아지면 패딩 최소화
+    // 화면 폭의 10% 또는 최소 8px, 최대 80px
+    final horizontalPadding = screenWidth < 600 
+        ? 8.0 
+        : (screenWidth * 0.1).clamp(16.0, 80.0);
     
     return Container(
       width: double.infinity,
@@ -65,6 +71,23 @@ class _HomePageState extends State<HomePage> {
         ),
       ),
     );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBusinessTypes();
+  }
+
+  Future<void> _loadBusinessTypes() async {
+    try {
+      final businessTypes = await _dataService.getBusinessTypeList();
+      setState(() {
+        _menus = MenuData.getMainMenus(businessTypes: businessTypes);
+      });
+    } catch (e) {
+      print('사업 타입 로딩 오류: $e');
+    }
   }
 
   @override
@@ -132,7 +155,15 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final isMobile = MediaQuery.of(context).size.width < 768;
+    
     return Scaffold(
+      endDrawer: isMobile ? MainNavigationBar.buildMobileMenu(
+        context,
+        _menus,
+        _onMenuTap,
+        _selectedMenuId,
+      ) : null,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [

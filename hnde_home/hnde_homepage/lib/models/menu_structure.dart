@@ -1,3 +1,5 @@
+import 'business_type.dart';
+
 class MenuItem {
   final String id;
   final String title;
@@ -25,7 +27,36 @@ class SubMenuItem {
 }
 
 class MenuData {
-  static List<MenuItem> getMainMenus() {
+  static List<MenuItem> getMainMenus({List<BusinessType>? businessTypes}) {
+    // 기본 하위메뉴 (기존 3개)
+    final defaultBusinessSubMenus = [
+      SubMenuItem(
+          id: 'restarea', title: '휴게소사업', route: '/business/restarea'),
+      SubMenuItem(
+          id: 'manufacturing',
+          title: '제조유통사업',
+          route: '/business/manufacturing'),
+      SubMenuItem(id: 'food', title: '식음료사업', route: '/business/food'),
+    ];
+
+    // 동적 사업 타입을 하위메뉴로 추가
+    final businessSubMenus = <SubMenuItem>[...defaultBusinessSubMenus];
+    if (businessTypes != null) {
+      for (final businessType in businessTypes) {
+        // 기본 3개와 중복되지 않는 경우만 추가
+        final isDefault = businessType.name.contains('휴게소') ||
+            businessType.name.contains('제조유통') ||
+            businessType.name.contains('식음료');
+        if (!isDefault) {
+          businessSubMenus.add(SubMenuItem(
+            id: businessType.id,
+            title: businessType.name,
+            route: '/business/${businessType.id}',
+          ));
+        }
+      }
+    }
+
     return [
       MenuItem(
         id: 'home',
@@ -49,15 +80,7 @@ class MenuData {
       MenuItem(
         id: 'business',
         title: '사업소개',
-        subMenus: [
-          SubMenuItem(
-              id: 'restarea', title: '휴게소사업', route: '/business/restarea'),
-          SubMenuItem(
-              id: 'manufacturing',
-              title: '제조유통사업',
-              route: '/business/manufacturing'),
-          SubMenuItem(id: 'food', title: '식음료사업', route: '/business/food'),
-        ],
+        subMenus: businessSubMenus,
         route: '/business',
       ),
       MenuItem(

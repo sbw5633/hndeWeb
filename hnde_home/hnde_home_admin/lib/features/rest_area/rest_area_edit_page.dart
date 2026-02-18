@@ -135,9 +135,11 @@ class _RestAreaEditPageState extends ConsumerState<RestAreaEditPage> {
     return userInfo.when(
       data: (user) {
         final isRestAreaManager = user?.isRestAreaManager ?? false;
-        final canEdit = !isRestAreaManager || 
+        final isApproved = user?.isApproved ?? false;
+        final canEdit = isApproved && (
+            !isRestAreaManager || 
             (isRestAreaManager && widget.restArea != null && 
-             user?.restAreaId == widget.restArea!.id);
+             user?.restAreaId == widget.restArea!.id));
         
         // 휴게소 관리자가 본인 휴게소가 아닌 경우 접근 불가
         if (isRestAreaManager && widget.restArea != null && 
@@ -150,21 +152,21 @@ class _RestAreaEditPageState extends ConsumerState<RestAreaEditPage> {
           );
         }
         
-        return Scaffold(
-          appBar: AppBar(
-            title: Text(widget.restArea == null ? '휴게소 추가' : '휴게소 수정'),
-          ),
-          body: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.restArea == null ? '휴게소 추가' : '휴게소 수정'),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
             child: AbsorbPointer(
               absorbing: !canEdit,
               child: Opacity(
                 opacity: canEdit ? 1.0 : 0.6,
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
                       if (!canEdit)
                         Container(
                           width: double.infinity,
@@ -187,98 +189,98 @@ class _RestAreaEditPageState extends ConsumerState<RestAreaEditPage> {
                             ],
                           ),
                         ),
-                      TextFormField(
-                        controller: _nameController,
-                        decoration: const InputDecoration(
-                          labelText: '휴게소 이름 *',
-                          border: OutlineInputBorder(),
-                        ),
-                        validator: (v) => (v == null || v.isEmpty) ? '이름을 입력하세요' : null,
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _descriptionController,
-                        decoration: const InputDecoration(
-                          labelText: '간단 설명',
-                          border: OutlineInputBorder(),
-                        ),
-                        maxLines: 2,
-                      ),
-                      const SizedBox(height: 16),
-                      GestureDetector(
-                        onTap: canEdit ? _pickImage : null,
-                        child: Container(
-                          height: 200,
-                          decoration: BoxDecoration(
-                            color: Colors.grey[200],
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.grey[300]!),
-                          ),
-                          child: _imageUrl != null
-                              ? Stack(
-                                  children: [
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: Image.network(
-                                        _imageUrl!,
-                                        width: double.infinity,
-                                        height: 200,
-                                        fit: BoxFit.cover,
-                                      ),
-                                    ),
-                                    Positioned(
-                                      top: 8,
-                                      right: 8,
-                                      child: IconButton(
-                                        icon: const Icon(Icons.close,
-                                            color: Colors.white),
-                                        onPressed: canEdit ? () {
-                                          setState(() => _imageUrl = null);
-                                        } : null,
-                                      ),
-                                    ),
-                                  ],
-                                )
-                              : const Center(
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(Icons.add_photo_alternate, size: 48),
-                                      SizedBox(height: 8),
-                                      Text('이미지 선택'),
-                                    ],
-                                  ),
-                                ),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      if (_detail != null)
-                        RestAreaDetailEditTab(
-                          detail: _detail!,
-                          onDetailChanged: (detail) {
-                            if (canEdit) {
-                              setState(() => _detail = detail);
-                            }
-                          },
-                        ),
-                      const SizedBox(height: 24),
-                      if (canEdit)
-                        FilledButton(
-                          onPressed: _isLoading ? null : _save,
-                          style: FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                          ),
-                          child: _isLoading
-                              ? const SizedBox(
-                                  height: 20,
-                                  width: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Text('저장'),
-                        ),
-                    ],
-                  ),
+              TextFormField(
+                controller: _nameController,
+                decoration: const InputDecoration(
+                  labelText: '휴게소 이름 *',
+                  border: OutlineInputBorder(),
                 ),
+                validator: (v) => (v == null || v.isEmpty) ? '이름을 입력하세요' : null,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _descriptionController,
+                decoration: const InputDecoration(
+                  labelText: '간단 설명',
+                  border: OutlineInputBorder(),
+                ),
+                maxLines: 2,
+              ),
+              const SizedBox(height: 16),
+              GestureDetector(
+                        onTap: canEdit ? _pickImage : null,
+                child: Container(
+                  height: 200,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[200],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey[300]!),
+                  ),
+                  child: _imageUrl != null
+                      ? Stack(
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.network(
+                                _imageUrl!,
+                                width: double.infinity,
+                                height: 200,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                            Positioned(
+                              top: 8,
+                              right: 8,
+                              child: IconButton(
+                                icon: const Icon(Icons.close,
+                                    color: Colors.white),
+                                        onPressed: canEdit ? () {
+                                  setState(() => _imageUrl = null);
+                                        } : null,
+                              ),
+                            ),
+                          ],
+                        )
+                      : const Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.add_photo_alternate, size: 48),
+                              SizedBox(height: 8),
+                              Text('이미지 선택'),
+                            ],
+                          ),
+                        ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              if (_detail != null)
+                RestAreaDetailEditTab(
+                  detail: _detail!,
+                  onDetailChanged: (detail) {
+                            if (canEdit) {
+                    setState(() => _detail = detail);
+                            }
+                  },
+                ),
+              const SizedBox(height: 24),
+                      if (canEdit)
+              FilledButton(
+                onPressed: _isLoading ? null : _save,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+                child: _isLoading
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('저장'),
+              ),
+            ],
+          ),
+        ),
               ),
             ),
           ),
@@ -291,8 +293,8 @@ class _RestAreaEditPageState extends ConsumerState<RestAreaEditPage> {
         error: (_, __) => Scaffold(
           appBar: AppBar(title: const Text('휴게소 수정')),
           body: const Center(child: Text('사용자 정보를 불러올 수 없습니다.')),
-        ),
-      );
-    }
+      ),
+    );
+  }
 }
 

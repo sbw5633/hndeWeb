@@ -18,6 +18,68 @@ class MainNavigationBar extends StatefulWidget {
 
   @override
   State<MainNavigationBar> createState() => _MainNavigationBarState();
+
+  static Widget buildMobileMenu(BuildContext context, List<MenuItem> menus, Function(String) onMenuTap, String? selectedMenuId) {
+    return Drawer(
+      width: 280,
+      child: SafeArea(
+        child: Column(
+          children: [
+            // 헤더
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.blue[900],
+              ),
+              child: Row(
+                children: [
+                  const Text(
+                    'H&DE',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            // 메뉴 리스트
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: menus.map((menu) {
+                  final isSelected = (menu.id == 'home' && selectedMenuId == null) ||
+                      (menu.id != 'home' && selectedMenuId == menu.id);
+                  return ListTile(
+                    title: Text(
+                      menu.title,
+                      style: TextStyle(
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        color: isSelected ? Colors.orange : Colors.black87,
+                      ),
+                    ),
+                    trailing: isSelected
+                        ? const Icon(Icons.check, color: Colors.orange)
+                        : null,
+                    onTap: () {
+                      Navigator.pop(context);
+                      onMenuTap(menu.id);
+                    },
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _MainNavigationBarState extends State<MainNavigationBar> {
@@ -58,6 +120,7 @@ class _MainNavigationBarState extends State<MainNavigationBar> {
 
   @override
   Widget build(BuildContext context) {
+    // 메뉴는 HomePage에서 전달받도록 변경 (동적 메뉴 지원)
     final menus = MenuData.getMainMenus();
     final isMobile = MediaQuery.of(context).size.width < 768;
 
@@ -78,54 +141,70 @@ class _MainNavigationBarState extends State<MainNavigationBar> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            MouseRegion(
-              cursor: SystemMouseCursors.click,
-              child: GestureDetector(
-                onTap: () {
-                  widget.onMenuTap('home');
-                },
-                child: _isLoading
-                  ? const SizedBox(
-                      height: 50,
-                      width: 100,
-                      child: Center(
-                        child: SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      ),
-                    )
-                  : _config?.topLogoUrl != null &&
-                          _config!.topLogoUrl!.isNotEmpty
-                      ? Hero(
-                          tag: 'app_logo',
-                          child: Image.network(
-                            _config!.topLogoUrl!,
-                            height: 50,
-                            fit: BoxFit.contain,
-                          loadingBuilder: (context, child, loadingProgress) {
-                            if (loadingProgress == null) {
-                              print('🔝 로고 이미지 로드 완료: ${_config!.topLogoUrl}');
-                              return child;
-                            }
-                            return const SizedBox(
-                              height: 50,
-                              width: 100,
-                              child: Center(
-                                child: SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
+            Row(
+              children: [
+                MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    onTap: () {
+                      widget.onMenuTap('home');
+                    },
+                    child: _isLoading
+                      ? const SizedBox(
+                          height: 50,
+                          width: 100,
+                          child: Center(
+                            child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          ),
+                        )
+                      : _config?.topLogoUrl != null &&
+                              _config!.topLogoUrl!.isNotEmpty
+                          ? Hero(
+                              tag: 'app_logo',
+                              child: Image.network(
+                                _config!.topLogoUrl!,
+                                height: 50,
+                                fit: BoxFit.contain,
+                              loadingBuilder: (context, child, loadingProgress) {
+                                if (loadingProgress == null) {
+                                  print('🔝 로고 이미지 로드 완료: ${_config!.topLogoUrl}');
+                                  return child;
+                                }
+                                return const SizedBox(
+                                  height: 50,
+                                  width: 100,
+                                  child: Center(
+                                    child: SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ),
-                            );
-                          },
-                          errorBuilder: (context, error, stackTrace) {
-                            print('❌ 로고 이미지 로드 실패: $error');
-                            return Hero(
+                                );
+                              },
+                              errorBuilder: (context, error, stackTrace) {
+                                print('❌ 로고 이미지 로드 실패: $error');
+                                return Hero(
+                                  tag: 'app_logo',
+                                  child: Text(
+                                    'H&DE',
+                                    style: TextStyle(
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.blue[900],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          )
+                          : Hero(
                               tag: 'app_logo',
                               child: Text(
                                 'H&DE',
@@ -135,22 +214,36 @@ class _MainNavigationBarState extends State<MainNavigationBar> {
                                   color: Colors.blue[900],
                                 ),
                               ),
-                            );
-                          },
-                        ),
-                      )
-                      : Hero(
-                          tag: 'app_logo',
-                          child: Text(
-                            'H&DE',
-                            style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blue[900],
                             ),
+                  ),
+                ),
+                // 개발환경 표시
+                Builder(
+                  builder: (context) {
+                    const firebaseEnv = String.fromEnvironment('FIREBASE_ENV', defaultValue: 'dev');
+                    final isDev = firebaseEnv.toLowerCase() != 'prod';
+                    if (!isDev) return const SizedBox.shrink();
+                    return Padding(
+                      padding: const EdgeInsets.only(left: 12),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.orange,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          '개발서버(dev)',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-              ),
+                      ),
+                    );
+                  },
+                ),
+              ],
             ),
             if (!isMobile)
               Row(
@@ -170,11 +263,13 @@ class _MainNavigationBarState extends State<MainNavigationBar> {
                 }).toList(),
               )
             else
-              IconButton(
-                icon: const Icon(Icons.menu),
-                onPressed: () {
-                  // 모바일 메뉴 표시
-                },
+              Builder(
+                builder: (context) => IconButton(
+                  icon: const Icon(Icons.menu),
+                  onPressed: () {
+                    Scaffold.of(context).openEndDrawer();
+                  },
+                ),
               ),
           ],
         ),

@@ -24,6 +24,31 @@ class AdminSidebar extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const SizedBox(height: 16),
+            // 개발환경 표시
+            Builder(
+              builder: (context) {
+                const firebaseEnv = String.fromEnvironment('FIREBASE_ENV', defaultValue: 'dev');
+                final isDev = firebaseEnv.toLowerCase() != 'prod';
+                if (!isDev) return const SizedBox.shrink();
+                return Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.orange,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    '개발서버(dev)',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 8),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Text('HNDE Admin',
@@ -65,17 +90,9 @@ class AdminSidebar extends ConsumerWidget {
                         label: '회사소개',
                         onTap: () => context.go('/company')),
                     _NavButton(
-                        icon: Icons.restaurant,
-                        label: '휴게소 사업',
-                        onTap: () => context.go('/rest-areas')),
-                    _NavButton(
-                        icon: Icons.factory,
-                        label: '제조유통사업',
-                        onTap: () => context.go('/manufacturing-business')),
-                    _NavButton(
-                        icon: Icons.restaurant_menu,
-                        label: '식음료사업',
-                        onTap: () => context.go('/food-beverage-business')),
+                        icon: Icons.business_center,
+                        label: '주요사업',
+                        onTap: () => context.go('/business-types')),
                     _NavButton(
                         icon: Icons.campaign,
                         label: '홍보센터',

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../core/firestore_service.dart';
+// import '../core/migration_service.dart'; // 마이그레이션 완료로 주석처리
 
 class SplashScreen extends StatefulWidget {
   final VoidCallback onComplete;
@@ -27,8 +28,16 @@ class _SplashScreenState extends State<SplashScreen>
   String? _logoUrl;
   bool _logoLoaded = false;
   bool _animationStarted = false;
+  // bool _isMigrating = false;
+  // String? _migrationMessage;
   
   static const double _splashLogoSize = 200.0;
+
+  // 개발 환경 확인 (마이그레이션용 - 주석처리)
+  // bool get _isDevEnv {
+  //   const firebaseEnv = String.fromEnvironment('FIREBASE_ENV', defaultValue: 'dev');
+  //   return firebaseEnv.toLowerCase() != 'prod';
+  // }
 
   @override
   void initState() {
@@ -36,7 +45,7 @@ class _SplashScreenState extends State<SplashScreen>
     
     // 채우기 애니메이션 컨트롤러 초기화 (0→1로 부드럽게)
     _fillController = AnimationController(
-      duration: const Duration(milliseconds: 2000),
+      duration: const Duration(milliseconds: 1500),
       vsync: this,
       lowerBound: 0.0,
       upperBound: 1.0,
@@ -96,8 +105,6 @@ class _SplashScreenState extends State<SplashScreen>
 
   Future<void> _loadLogo() async {
     try {
-      print('📥 로고 로딩 시작...');
-      
       // Firestore에서 직접 topLogoUrl 필드만 빠르게 가져오기
       final firestoreService = FirestoreService();
       final doc = await firestoreService.getDocument(
@@ -109,7 +116,6 @@ class _SplashScreenState extends State<SplashScreen>
       if (!mounted) return;
       
       final logoUrl = doc?['topLogoUrl'] as String?;
-      print('📥 로고 URL: $logoUrl');
       
       // 이미지가 있는 경우 완전히 로딩될 때까지 대기
       if (logoUrl != null && logoUrl.isNotEmpty) {
@@ -117,32 +123,59 @@ class _SplashScreenState extends State<SplashScreen>
           // 이미지를 메모리에 완전히 로딩
           final imageProvider = CachedNetworkImageProvider(logoUrl);
           await precacheImage(imageProvider, context);
-          print('✅ 로고 이미지 로딩 완료: $logoUrl');
         } catch (e) {
-          print('⚠️ 로고 이미지 프리캐시 오류: $e');
+          // 프리캐시 실패 시에도 애니메이션은 진행 (텍스트 로고 fallback 가능)
         }
       }
       
-      // 로고 URL이 없어도 로딩 완료로 표시 (버튼이 나타나도록)
+      // 로고 URL이 없어도 로딩 완료로 표시
       if (mounted) {
         setState(() {
           _logoUrl = logoUrl;
           _logoLoaded = true;
         });
-        print('✅ _logoLoaded = true로 설정됨 (로고 URL: $logoUrl)');
+        // 로고 로딩이 끝나면 즉시 애니메이션 시작
+        _startAnimation();
       }
-    } catch (e, stackTrace) {
-      print('❌ 로고 로드 오류: $e');
-      print('스택 트레이스: $stackTrace');
-      // 오류가 발생해도 로딩 완료로 표시 (버튼이 나타나도록)
+    } catch (e) {
+      // 오류가 발생해도 로딩 완료로 표시
       if (mounted) {
         setState(() {
           _logoLoaded = true;
         });
-        print('✅ 오류 후에도 _logoLoaded = true로 설정됨');
+        // 로딩 실패해도 텍스트 로고로 애니메이션 진행
+        _startAnimation();
       }
     }
   }
+
+  // 마이그레이션 실행 (주석처리)
+  // Future<void> _runMigration() async {
+  //   if (_isMigrating) return;
+  //   
+  //   setState(() {
+  //     _isMigrating = true;
+  //     _migrationMessage = '마이그레이션 시작...';
+  //   });
+
+  //   try {
+  //     await migrateHistoryData();
+  //     
+  //     if (mounted) {
+  //       setState(() {
+  //         _migrationMessage = '✅ 마이그레이션 완료!';
+  //         _isMigrating = false;
+  //       });
+  //     }
+  //   } catch (e) {
+  //     if (mounted) {
+  //       setState(() {
+  //         _migrationMessage = '❌ 마이그레이션 실패: $e';
+  //         _isMigrating = false;
+  //       });
+  //     }
+  //   }
+  // }
 
 
   void _startFillAnimation() {
@@ -197,34 +230,11 @@ class _SplashScreenState extends State<SplashScreen>
       backgroundColor: Colors.white,
       body: Stack(
         children: [
-
-// AnimatedBuilder(
-//   animation: _fillController, // 미리 선언된 컨트롤러
-//   builder: (context, child) {
-//     return ClipRect( // 1. 넘치는 부분을 잘라냄
-//       child: Align(
-//         alignment: Alignment.centerLeft, // 2. 왼쪽 고정
-//         widthFactor: _fillController.value, // 3. 0.0 ~ 1.0 (핵심!)
-//         child: SizedBox(
-//           width: 200, // 원래 로고의 가로 크기
-//           height: 200, // 원래 로고의 세로 크기
-//           child: Image.network(
-//             '로고주소',
-//             fit: BoxFit.contain,
-//             alignment: Alignment.centerLeft, // 4. 이미지 내용물도 왼쪽 고정
-//           ),
-//         ),
-//       ),
-//     );
-//   },
-// ),
-
           // 로고 애니메이션
           AnimatedBuilder(
             animation: _fillController,
             builder: (context, child) {
               final widthFactor = _fillController.value;
-              print('🎨 widthFactor: $widthFactor, _animationStarted: $_animationStarted'); // 디버깅용
               
               // 애니메이션 시작 전에는 아무것도 표시하지 않음
               if (!_animationStarted) {
@@ -232,8 +242,7 @@ class _SplashScreenState extends State<SplashScreen>
               }
               
               return Center(
-                child: 
-                _buildLogo(widthFactor),
+                child: _buildLogo(widthFactor),
               );
             },
           ),
@@ -242,30 +251,87 @@ class _SplashScreenState extends State<SplashScreen>
             const Center(
               child: CircularProgressIndicator(),
             ),
-          // 테스트용 버튼 (애니메이션 시작) - 로딩 완료 후 표시
-          if (!_animationStarted && _logoLoaded)
-            Center(
-              child: ElevatedButton(
-                onPressed: _startAnimation,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue[900],
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                ),
-                child: const Text(
-                  '애니메이션 시작',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ),
+          
+          // 개발 환경일 때 마이그레이션 버튼 (주석처리)
+          // if (_isDevEnv && _logoLoaded && !_animationStarted)
+          //   Positioned(
+          //     bottom: 100,
+          //     left: 0,
+          //     right: 0,
+          //     child: Column(
+          //       mainAxisSize: MainAxisSize.min,
+          //       children: [
+          //         if (_migrationMessage != null)
+          //           Padding(
+          //             padding: const EdgeInsets.only(bottom: 16),
+          //             child: Text(
+          //               _migrationMessage!,
+          //               style: TextStyle(
+          //                 fontSize: 16,
+          //                 fontWeight: FontWeight.bold,
+          //                 color: _migrationMessage!.startsWith('✅')
+          //                     ? Colors.green
+          //                     : _migrationMessage!.startsWith('❌')
+          //                         ? Colors.red
+          //                         : Colors.blue[900],
+          //               ),
+          //             ),
+          //           ),
+          //         ElevatedButton(
+          //           onPressed: _isMigrating ? null : _runMigration,
+          //           style: ElevatedButton.styleFrom(
+          //             backgroundColor: Colors.orange,
+          //             foregroundColor: Colors.white,
+          //             padding: const EdgeInsets.symmetric(
+          //               horizontal: 32,
+          //               vertical: 16,
+          //             ),
+          //           ),
+          //           child: _isMigrating
+          //               ? const SizedBox(
+          //                   width: 20,
+          //                   height: 20,
+          //                   child: CircularProgressIndicator(
+          //                     strokeWidth: 2,
+          //                     valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+          //                   ),
+          //                 )
+          //               : const Text(
+          //                   '마이그레이션',
+          //                   style: TextStyle(
+          //                     fontSize: 18,
+          //                     fontWeight: FontWeight.bold,
+          //                   ),
+          //                 ),
+          //         ),
+          //         const SizedBox(height: 16),
+          //         ElevatedButton(
+          //           onPressed: _startAnimation,
+          //           style: ElevatedButton.styleFrom(
+          //             backgroundColor: Colors.blue[900],
+          //             foregroundColor: Colors.white,
+          //             padding: const EdgeInsets.symmetric(
+          //               horizontal: 32,
+          //               vertical: 16,
+          //             ),
+          //           ),
+          //           child: const Text(
+          //             '홈페이지로 이동',
+          //             style: TextStyle(
+          //               fontSize: 18,
+          //               fontWeight: FontWeight.bold,
+          //             ),
+          //           ),
+          //         ),
+          //       ],
+          //     ),
+          //   ),
         ],
       ),
     );
   }
 
   Widget _buildLogo(double widthFactor) {
-    print('🖼️ _buildLogo called with widthFactor: $widthFactor');
-    
     if (!_logoLoaded) {
       return const SizedBox(
         width: _splashLogoSize,
@@ -280,33 +346,40 @@ class _SplashScreenState extends State<SplashScreen>
       return _buildTextLogo(widthFactor);
     }
 
+    // widthFactor가 0이면 아예 그리지 않음 (초기 "띡" 방지)
+    if (widthFactor <= 0.001) {
+      return const SizedBox(
+        width: _splashLogoSize,
+        height: _splashLogoSize,
+      );
+    }
+
     // 좌→우 펼치기 애니메이션
-return Container( // 1. 무대: 화면 중앙에 자리를 잡고 있는 200x200 크기의 빈 박스
-    width: _splashLogoSize,
-    height: _splashLogoSize,
-    alignment: Alignment.centerLeft, // [중요] 안쪽 자식을 왼쪽으로 붙임
-    child: ClipRect( // 2. 가위: 영역 밖으로 나가는 이미지를 자름
-      child: Align(
-        alignment: Alignment.centerLeft, // 3. 기준: 왼쪽을 기점으로 창문을 염
-        widthFactor: widthFactor, // 4. 비율: 0.0 -> 1.0 (애니메이션 값)
-        child: SizedBox( // 5. 실제 내용물: 가위질을 당하는 녀석 (크기 고정 필수)
-          width: _splashLogoSize,
-          height: _splashLogoSize,
-          child: Image(
-            image: CachedNetworkImageProvider(_logoUrl!),
-            fit: BoxFit.contain,
-            alignment: Alignment.centerLeft, // 이미지 내용물도 왼쪽 고정
-            errorBuilder: (context, error, stackTrace) => _buildTextLogo(widthFactor),
+    return Container(
+      width: _splashLogoSize,
+      height: _splashLogoSize,
+      alignment: Alignment.centerLeft,
+      child: ClipRect(
+        child: Align(
+          alignment: Alignment.centerLeft,
+          widthFactor: widthFactor.clamp(0.0, 1.0),
+          child: SizedBox(
+            width: _splashLogoSize,
+            height: _splashLogoSize,
+            child: Image(
+              image: CachedNetworkImageProvider(_logoUrl!),
+              fit: BoxFit.contain,
+              alignment: Alignment.centerLeft,
+              errorBuilder: (context, error, stackTrace) =>
+                  _buildTextLogo(widthFactor),
+            ),
           ),
         ),
       ),
-    ),
-  );
+    );
   }
 
   Widget _buildTextLogo(double widthFactor) {
-    print('📝 _buildTextLogo called with widthFactor: $widthFactor');
-    
     const textStyle = TextStyle(
       fontSize: 72,
       fontWeight: FontWeight.bold,

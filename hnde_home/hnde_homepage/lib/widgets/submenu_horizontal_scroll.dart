@@ -30,6 +30,9 @@ class _SubMenuHorizontalScrollState extends State<SubMenuHorizontalScroll> {
   final Map<String, GlobalKey> _cardKeys = {};
   bool _showLeftArrow = false;
   bool _showRightArrow = true;
+  double _currentHorizontalPadding = 80;
+  double _currentCardSpacing = 24;
+  double _currentCardWidth = 300;
 
   @override
   void initState() {
@@ -67,13 +70,8 @@ class _SubMenuHorizontalScrollState extends State<SubMenuHorizontalScroll> {
 
     if (selectedIndex == -1) return;
 
-    // 카드 너비 + 간격 계산
-    final cardWidth = 300.0;
-    final cardSpacing = 24.0;
-    final padding = 80.0;
-
-    // 선택된 카드의 위치 계산
-    final targetScroll = (selectedIndex * (cardWidth + cardSpacing)) - padding;
+    // 선택된 카드의 위치 계산 (반응형 값 사용)
+    final targetScroll = (selectedIndex * (_currentCardWidth + _currentCardSpacing)) - _currentHorizontalPadding;
 
     // 스크롤 범위 확인
     final maxScroll = _scrollController.position.maxScrollExtent;
@@ -129,6 +127,17 @@ class _SubMenuHorizontalScrollState extends State<SubMenuHorizontalScroll> {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isNarrow = screenWidth < 600;
+    final horizontalPadding = isNarrow ? 8.0 : (screenWidth * 0.08).clamp(24.0, 80.0);
+    final arrowWidth = isNarrow ? 32.0 : 80.0;
+    final cardSpacing = isNarrow ? 12.0 : 24.0;
+    final cardWidth = isNarrow ? (screenWidth * 0.42).clamp(140.0, 220.0) : 300.0;
+
+    _currentHorizontalPadding = horizontalPadding;
+    _currentCardSpacing = cardSpacing;
+    _currentCardWidth = cardWidth;
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
@@ -140,8 +149,8 @@ class _SubMenuHorizontalScrollState extends State<SubMenuHorizontalScroll> {
             duration: const Duration(milliseconds: 300),
             curve: Curves.easeInOut,
             padding: EdgeInsets.symmetric(
-              horizontal: 80,
-              vertical: widget.isExpanded ? 24 : 12,
+              horizontal: horizontalPadding,
+              vertical: widget.isExpanded ? (isNarrow ? 16 : 24) : (isNarrow ? 8 : 12),
             ),
             child: SingleChildScrollView(
               controller: _scrollController,
@@ -153,12 +162,14 @@ class _SubMenuHorizontalScrollState extends State<SubMenuHorizontalScroll> {
                   return Padding(
                     key: _cardKeys[subMenu.id],
                     padding: EdgeInsets.only(
-                        right: index < widget.subMenus.length - 1 ? 24 : 0),
+                        right: index < widget.subMenus.length - 1 ? cardSpacing : 0),
                     child: _SubMenuCard(
                       subMenu: subMenu,
                       menuId: widget.menuId,
                       isSelected: widget.selectedSubMenuId == subMenu.id,
                       isExpanded: widget.isExpanded,
+                      cardWidth: cardWidth,
+                      isNarrow: isNarrow,
                       onTap: () => widget.onSubMenuTap(subMenu.id),
                     ),
                   );
@@ -172,7 +183,7 @@ class _SubMenuHorizontalScrollState extends State<SubMenuHorizontalScroll> {
               top: 0,
               bottom: 0,
               child: Container(
-                width: 80,
+                width: arrowWidth,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.centerLeft,
@@ -198,7 +209,7 @@ class _SubMenuHorizontalScrollState extends State<SubMenuHorizontalScroll> {
               top: 0,
               bottom: 0,
               child: Container(
-                width: 80,
+                width: arrowWidth,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.centerRight,
@@ -229,6 +240,8 @@ class _SubMenuCard extends StatelessWidget {
   final String menuId;
   final bool isSelected;
   final bool isExpanded;
+  final double cardWidth;
+  final bool isNarrow;
   final VoidCallback onTap;
 
   const _SubMenuCard({
@@ -236,6 +249,8 @@ class _SubMenuCard extends StatelessWidget {
     required this.menuId,
     this.isSelected = false,
     this.isExpanded = true,
+    required this.cardWidth,
+    required this.isNarrow,
     required this.onTap,
   });
 
@@ -244,7 +259,7 @@ class _SubMenuCard extends StatelessWidget {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
-      width: 300,
+      width: cardWidth,
       height: isExpanded ? 400 : 80,
       decoration: BoxDecoration(
         color: Colors.white,
@@ -265,7 +280,7 @@ class _SubMenuCard extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(16),
         child: Padding(
-          padding: EdgeInsets.all(isExpanded ? 24 : 16),
+          padding: EdgeInsets.all(isExpanded ? (isNarrow ? 12 : 24) : (isNarrow ? 8 : 16)),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment:

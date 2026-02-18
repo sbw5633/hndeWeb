@@ -347,15 +347,19 @@ class _HomePageState extends ConsumerState<HomePage> {
       body: userInfo.when(
         data: (user) {
           final isAdmin = user?.isAdmin ?? false;
-          
+          final isApproved = user?.isApproved ?? false;
+          // 미승인: 상단 배너는 ShellRoute에서 표시. 여기서는 관리자와 동일한 화면을 보여주되 수정만 불가.
+          final canEdit = isAdmin && isApproved;
+          final showFullEditUI = isAdmin || !isApproved;
+
           return asyncConfig.when(
             data: (config) {
               if (config != null && _topLogoUrl == null) {
                 WidgetsBinding.instance.addPostFrameCallback((_) => _loadData());
               }
               
-              // 휴게소 관리자인 경우: 읽기 전용 미리보기만 표시
-              if (!isAdmin) {
+              // 승인된 휴게소 관리자: 읽기 전용 미리보기만 표시
+              if (!showFullEditUI) {
                 return SingleChildScrollView(
                   padding: const EdgeInsets.all(16),
                   child: Column(
@@ -463,12 +467,14 @@ class _HomePageState extends ConsumerState<HomePage> {
                 );
               }
               
-              // 관리자인 경우: 편집 UI 표시
+              // 관리자인 경우(또는 미승인 시 동일 화면): 편집 UI 표시, 미승인 시 수정 불가
               return SingleChildScrollView(
                 padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
+                child: AbsorbPointer(
+                  absorbing: !canEdit,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
                 // 상단 로고 섹션
                 Card(
                   child: Padding(
@@ -482,9 +488,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                         ),
                         const SizedBox(height: 16),
                         AbsorbPointer(
-                          absorbing: !isAdmin,
+                          absorbing: !canEdit,
                           child: GestureDetector(
-                            onTap: isAdmin ? _pickTopLogo : null,
+                            onTap: canEdit ? _pickTopLogo : null,
                             child: Container(
                               height: 100,
                               decoration: BoxDecoration(
@@ -619,7 +625,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                         ],
                         // 이미지 추가 버튼
                         OutlinedButton.icon(
-                          onPressed: _pickMainImage,
+                          onPressed: canEdit ? _pickMainImage : null,
                           icon: const Icon(Icons.add_photo_alternate),
                           label: const Text('이미지 추가'),
                         ),
@@ -1372,7 +1378,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                   ),
                 ),
                 const SizedBox(height: 24),
-                if (isAdmin)
+                if (canEdit)
                   FilledButton(
                     onPressed: _isLoading ? null : _save,
                     style: FilledButton.styleFrom(
@@ -1387,6 +1393,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                         : const Text('저장'),
                   ),
               ],
+            ),
             ),
           );
             },

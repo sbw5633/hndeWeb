@@ -2,8 +2,15 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-// Firebase 설정
-const firebaseConfig = {
+enum FirebaseEnv { dev, prod }
+
+FirebaseEnv getFirebaseEnv() {
+  const value = String.fromEnvironment('FIREBASE_ENV', defaultValue: 'dev');
+  return value.toLowerCase() == 'prod' ? FirebaseEnv.prod : FirebaseEnv.dev;
+}
+
+// Firebase 설정 (Dev)
+const Map<String, String> _firebaseConfigDev = {
   'apiKey': 'AIzaSyBChBQLN_ovjGB6V-Znio_T_kgCvm92dBQ',
   'authDomain': 'hnde-homepage-db.firebaseapp.com',
   'projectId': 'hnde-homepage-db',
@@ -13,7 +20,24 @@ const firebaseConfig = {
   'measurementId': 'G-CXN9CY1SRT',
 };
 
+// Firebase 설정 (Prod)
+const Map<String, String> _firebaseConfigProd = {
+  'apiKey': 'AIzaSyAYNbgb50N79TNvKOj55y2rqirXKwVwBLU',
+  'authDomain': 'hnde-homepage-prod.firebaseapp.com',
+  'projectId': 'hnde-homepage-prod',
+  'storageBucket': 'hnde-homepage-prod.firebasestorage.app',
+  'messagingSenderId': '639763470001',
+  'appId': '1:639763470001:web:e0df48613776f5ca687490',
+  'measurementId': 'G-P3XD3NZBKM',
+};
+
+Map<String, String> _selectFirebaseConfig() {
+  final env = getFirebaseEnv();
+  return env == FirebaseEnv.prod ? _firebaseConfigProd : _firebaseConfigDev;
+}
+
 Future<void> initFirebase() async {
+  final firebaseConfig = _selectFirebaseConfig();
   await Firebase.initializeApp(
     options: FirebaseOptions(
       apiKey: firebaseConfig['apiKey']!,

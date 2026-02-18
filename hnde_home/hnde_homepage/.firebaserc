@@ -1,0 +1,23 @@
+{
+  "projects": {
+    "default": "hnde-homepage-db",
+    "prod": "hnde-homepage-prod"
+  },
+  "targets": {
+    "hnde-homepage-db": {
+      "hosting": {
+        "homepage": [
+          "hnde-homepage"
+        ]
+      }
+    },
+    "hnde-homepage-prod": {
+      "hosting": {
+        "homepage": [
+          "hnde-homepage-prod"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

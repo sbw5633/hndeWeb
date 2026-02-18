@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../services/data_service.dart';
+import '../models/business_type.dart';
 
 class Footer extends StatelessWidget {
   final Function(String menuId, String? subMenuId)? onMenuTap;
@@ -68,33 +70,76 @@ class Footer extends StatelessWidget {
                   ),
                   // 사업 분야
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '사업 분야',
-                          style: GoogleFonts.notoSans(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                    child: FutureBuilder<List<BusinessType>>(
+                      future: DataService().getBusinessTypeList(),
+                      builder: (context, snapshot) {
+                        final defaultLinks = [
+                          _FooterLink(
+                            text: '휴게소사업',
+                            onTap: () => onMenuTap?.call('business', 'restarea'),
                           ),
-                        ),
-                        const SizedBox(height: 12),
-                        _FooterLink(
-                          text: '휴게소사업',
-                          onTap: () => onMenuTap?.call('business', 'restarea'),
-                        ),
-                        const SizedBox(height: 8),
-                        _FooterLink(
-                          text: '제조유통사업',
-                          onTap: () => onMenuTap?.call('business', 'manufacturing'),
-                        ),
-                        const SizedBox(height: 8),
-                        _FooterLink(
-                          text: '식음료사업',
-                          onTap: () => onMenuTap?.call('business', 'food'),
-                        ),
-                      ],
+                          const SizedBox(height: 8),
+                          _FooterLink(
+                            text: '제조유통사업',
+                            onTap: () => onMenuTap?.call('business', 'manufacturing'),
+                          ),
+                          const SizedBox(height: 8),
+                          _FooterLink(
+                            text: '식음료사업',
+                            onTap: () => onMenuTap?.call('business', 'food'),
+                          ),
+                        ];
+                        
+                        if (snapshot.connectionState == ConnectionState.waiting || !snapshot.hasData) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '사업 분야',
+                                style: GoogleFonts.notoSans(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              ...defaultLinks,
+                            ],
+                          );
+                        }
+                        
+                        final businessTypes = snapshot.data!;
+                        final customBusinessTypes = businessTypes.where((bt) {
+                          return !bt.name.contains('휴게소') &&
+                              !bt.name.contains('제조유통') &&
+                              !bt.name.contains('식음료');
+                        }).toList();
+                        
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '사업 분야',
+                              style: GoogleFonts.notoSans(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            ...defaultLinks,
+                            ...customBusinessTypes.map((bt) => Column(
+                              children: [
+                                const SizedBox(height: 8),
+                                _FooterLink(
+                                  text: bt.name,
+                                  onTap: () => onMenuTap?.call('business', bt.id),
+                                ),
+                              ],
+                            )),
+                          ],
+                        );
+                      },
                     ),
                   ),
                   // 회사소개

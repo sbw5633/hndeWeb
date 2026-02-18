@@ -22,6 +22,7 @@ class _RestAreaListPageState extends ConsumerState<RestAreaListPage> {
       data: (user) {
         final isAdmin = user?.isAdmin ?? false;
         final isRestAreaManager = user?.isRestAreaManager ?? false;
+        final canEdit = user?.isApproved ?? false;
         
         return restAreas.when(
           data: (items) {
@@ -34,8 +35,8 @@ class _RestAreaListPageState extends ConsumerState<RestAreaListPage> {
               return const Center(child: Text('등록된 휴게소가 없습니다.'));
             }
 
-            // 관리자인 경우에만 ReorderableListView 사용
-            if (isAdmin) {
+            // 관리자이고 승인된 경우에만 ReorderableListView(편집) 사용
+            if (isAdmin && canEdit) {
               return ReorderableListView.builder(
                 padding: const EdgeInsets.all(16),
                 buildDefaultDragHandles: false,
@@ -66,6 +67,7 @@ class _RestAreaListPageState extends ConsumerState<RestAreaListPage> {
                     item: item,
                     user: user!,
                     isAdmin: isAdmin,
+                    canEdit: canEdit,
                     onEdit: () => Navigator.push(
                       context,
                       MaterialPageRoute(
@@ -88,6 +90,7 @@ class _RestAreaListPageState extends ConsumerState<RestAreaListPage> {
                     item: item,
                     user: user!,
                     isAdmin: isAdmin,
+                    canEdit: canEdit,
                     onEdit: () => Navigator.push(
                       context,
                       MaterialPageRoute(
@@ -137,6 +140,7 @@ class _RestAreaListItem extends StatelessWidget {
   final RestArea item;
   final dynamic user;
   final bool isAdmin;
+  final bool canEdit;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
@@ -145,6 +149,7 @@ class _RestAreaListItem extends StatelessWidget {
     required this.item,
     required this.user,
     required this.isAdmin,
+    required this.canEdit,
     required this.onEdit,
     required this.onDelete,
   });
@@ -157,7 +162,7 @@ class _RestAreaListItem extends StatelessWidget {
         leading: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (isAdmin)
+            if (isAdmin && canEdit)
               ReorderableDragStartListener(
                 index: item.order,
                 child: Padding(
@@ -179,15 +184,17 @@ class _RestAreaListItem extends StatelessWidget {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            IconButton(
-              icon: const Icon(Icons.edit),
-              onPressed: onEdit,
-            ),
-            if (isAdmin)
+            if (canEdit) ...[
               IconButton(
-                icon: const Icon(Icons.delete),
-                onPressed: onDelete,
+                icon: const Icon(Icons.edit),
+                onPressed: onEdit,
               ),
+              if (isAdmin)
+                IconButton(
+                  icon: const Icon(Icons.delete),
+                  onPressed: onDelete,
+                ),
+            ],
           ],
         ),
       ),
