@@ -1,0 +1,53 @@
+// 샘플 규칙 — 프로덕션 전 보안 검토 필수
+// 경로: artifacts/hnde-work-web/public/data/{submissions,posts,messages,culture_day_bundles,culture_day_ingest_jobs}
+//       artifacts/hnde-work-web/users/{uid}/todos
+//       submissions/{id}/sites
+//
+// [규칙 적용 단위 — “컬럼” vs 문서 vs 컬렉션]
+// - Firestore는 SQL처럼 “한 문서 안의 특정 필드만” 읽기 허용을 나누지 않습니다.
+//   한 문서에 read가 통과하면 그 문서의 모든 필드를 클라이언트가 읽을 수 있습니다.
+// - 따라서 사업소별로 나누려면 (1) 문서를 사업소/레코드 단위로 쪼개거나
+//   (2) 경로에 사업소를 넣는 방식(예: .../by_branch/{branchId}/...)이 일반적입니다.
+// - 컬렉션 단위로만 가능한 것이 아니라, match 경로의 {문서ID}와 resource.data.필드 조건으로
+//   “문서마다” 다른 allow를 둘 수 있습니다. list/query는 “반환되는 각 문서”가 규칙을 통과해야 하며,
+//   보통 쿼리의 where와 규칙 조건을 맞춥니다.
+// - 사용자 소속·roleIdx(0~7, role_constants.dart)는 보통 users/{uid}/profile/main 등에 두고
+//   규칙에서 get()으로 읽거나, Custom Claims로 넣어 request.auth.token에서 검사합니다.
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /artifacts/{appId}/public/data/{collection}/{docId} {
+      allow read: if request.auth != null;
+      allow create, update, delete: if request.auth != null;
+    }
+
+    // 문화의 날 번들·작업 큐 (문서 `data` 하위 서브컬렉션)
+    match /artifacts/{appId}/public/data/culture_day_bundles/{bundleId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    match /artifacts/{appId}/public/data/culture_day_ingest_jobs/{jobId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    match /artifacts/{appId}/public/data/submissions/{subId}/sites/{siteId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    match /artifacts/{appId}/users/{uid}/profile/{p} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    match /artifacts/{appId}/users/{uid}/todos/{todoId} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    match /artifacts/{appId}/users/{uid} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

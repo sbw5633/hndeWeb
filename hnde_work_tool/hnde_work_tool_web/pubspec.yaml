@@ -1,0 +1,89 @@
+name: hnde_work_tool_web
+description: "A new Flutter project."
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ^3.10.3
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  flutter_localizations:
+    sdk: flutter
+  firebase_core: ^4.0.0
+  firebase_auth: ^6.0.0
+  cloud_firestore: ^6.0.0
+  firebase_storage: ^13.0.0
+  go_router: ^17.1.0
+  table_calendar: ^3.2.0
+  excel: ^4.0.6
+  xml: ^6.5.0
+  spreadsheet_decoder: ^2.3.0
+  intl: ^0.20.2
+  file_picker: ^10.3.10
+  google_sign_in: ^6.2.2
+  http: ^1.2.2
+  provider: ^6.1.2
+  syncfusion_flutter_pdf: ^28.2.12
+  archive: ^3.6.1
+  reorderables: ^0.6.0
+  pdfx: ^2.9.2
+  image: ^4.3.0
+  crop_your_image: ^2.0.0
+  flutter_map: ^7.0.2
+  url_launcher: ^6.3.1
+  shimmer: ^3.0.0
+  shared_preferences: ^2.5.3
+  cached_network_image: ^3.4.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/logo_3d_favi.png"
+  web:
+    generate: true
+    image_path: "assets/images/favicon.png"
+    background_color: "#ffffff"
+    theme_color: "#ffffff"
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/company/
+    - assets/fonts/
+    - assets/insurance/
+
+  fonts:
+    - family: NotoSansKR
+      fonts:
+        - asset: assets/fonts/NotoSansKR-Regular.otf
+          weight: 400
+        - asset: assets/fonts/NotoSansKR-Bold.otf
+          weight: 700
+    - family: Bazzi
+      fonts:
+        - asset: assets/fonts/Bazzi OTF.otf
+    - family: Griun
+      fonts:
+        - asset: assets/fonts/Griun_PolHumanrights-Rg.ttf
+    - family: Jalnan2
+      fonts:
+        - asset: assets/fonts/Jalnan2.otf
+    - family: MabinogiClassic
+      fonts:
+        - asset: assets/fonts/Mabinogi_Classic_OTF.otf
+    - family: MoneygraphyRounded
+      fonts:
+        - asset: assets/fonts/Moneygraphy-Rounded.otf
+    - family: Ongle
+      fonts:
+        - asset: assets/fonts/Ongle.ttf

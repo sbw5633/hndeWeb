@@ -1,0 +1,25 @@
+# Cloudflare 대시보드에서 R2 버킷 이름과 동일하게 맞출 것
+name = "hnde-r2-proxy"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+
+# 로컬 `npm run dev` 전용 (선택). 일상 Flutter 개발은 배포 Worker URL만 쓰면 됨.
+[dev]
+port = 8787
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "hnde-work-files"
+
+# 공개 설정 (비밀이 아님). 배포 후 필요 시 wrangler.toml 수정 또는 대시보드에서 덮어쓰기
+[vars]
+FIREBASE_PROJECT_ID = "hnde-work-web"
+# 예: uid1,uid2 — 메인관리자 파일 목록/삭제 허용 (Firebase Auth uid)
+ADMIN_UIDS = "T6xEyrDDr0a8R5BjsbSp1LbqQrr2"
+# 업로드 응답·Firestore에 넣는 fileUrl 접두사 (버킷 공개 URL 형식, 슬래시 없이 접두만)
+R2_PUBLIC_BASE_URL = "https://9bbd2af14e8664d4eefdbdf8a80bcaf6.r2.cloudflarestorage.com/hnde-work-files"
+
+# 비밀:
+#   wrangler secret put DOWNLOAD_SIGN_SECRET
+#   wrangler secret put GEMINI_API_KEY   ← Gemini AI (Flutter 번들에 키 없음)
+#   wrangler secret put TOUR_API_SERVICE_KEY  ← TourAPI(공공데이터포털) 프록시 + 문화의 날 AI 수집

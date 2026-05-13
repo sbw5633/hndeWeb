@@ -1,0 +1,125 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() { return request.auth != null; }
+    function myUid() { return request.auth.uid; }
+    function myProfile(appId) {
+      return get(/databases/$(database)/documents/artifacts/$(appId)/users/$(myUid())/profile/main).data;
+    }
+    function isMainAdmin(appId) {
+      return isSignedIn() && (myProfile(appId).mainAdmin == true);
+    }
+    function isBypassSuperAdmin() {
+      return isSignedIn() && request.auth.token.email == 'hndebw@gmail.com';
+    }
+    function isMainAdminOrBypass(appId) {
+      return isMainAdmin(appId) || isBypassSuperAdmin();
+    }
+
+    // 공개 데이터: 문서 1단 + 필요 시 서브컬렉션(게시글 댓글 등)
+    match /artifacts/{appId}/public/data/{collection}/{docId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn();
+
+      match /comments/{commentId} {
+        allow read: if isSignedIn();
+        allow create, update, delete: if isSignedIn();
+      }
+
+      // 대화방 메시지 스레드 (`conversations/{id}/messages/{msgId}`)
+      match /messages/{messageId} {
+        allow read: if isSignedIn();
+        allow create, update, delete: if isSignedIn();
+      }
+    }
+
+    // --- Posts: 소프트 삭제/리비전용 권한(가장 구체 매치) ---
+    match /artifacts/{appId}/public/data/posts/{postId} {
+      allow read: if isSignedIn();
+
+      // 작성: 로그인 사용자. (익명 게시판도 authorUid는 저장됨)
+      allow create: if isSignedIn() && request.resource.data.authorUid == myUid();
+
+      // 수정본 생성은 create로만 처리(새 문서). 기존 문서는 content 수정 금지.
+      // update는 "소프트 삭제" 또는 "리비전 대체 마킹"만 허용.
+      function isDeleteAdmin() {
+        // 요청사항: 메인관리자(0), 본사관리자(1)만 전 글 삭제 가능
+        return isSignedIn() && (myProfile(appId).roleIdx == 0 || myProfile(appId).roleIdx == 1);
+      }
+      function isAuthor() {
+        return isSignedIn() && resource.data.authorUid == myUid();
+      }
+      function onlyAllowedPostUpdateFields() {
+        // 허용 필드만 변경되었는지 검사
+        return request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'deleted',
+          'deletedAt',
+          'deletedByUid',
+          'isLatest',
+          'supersededBy',
+          'supersededAt'
+        ]);
+      }
+      function validSoftDeletePatch() {
+        return request.resource.data.deleted == true
+          && request.resource.data.deletedByUid == myUid();
+      }
+      function validSupersedePatch() {
+        return request.resource.data.isLatest == false
+          && request.resource.data.supersededBy is string;
+      }
+
+      allow update: if isSignedIn()
+        && onlyAllowedPostUpdateFields()
+        && (
+          // 작성자: 리비전 마킹(isLatest=false) + 본인 글 삭제 가능
+          (isAuthor() && (validSoftDeletePatch() || validSupersedePatch()))
+          ||
+          // 관리자: 모든 글 삭제 가능(수정/리비전 마킹 불가)
+          (isDeleteAdmin() && validSoftDeletePatch())
+        );
+
+      // 물리 삭제 금지(로그 남김)
+      allow delete: if false;
+
+      match /comments/{commentId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && request.resource.data.authorUid == myUid();
+        // 댓글은 현재 정책 유지(필요 시 별도 강화 가능)
+        allow update, delete: if isSignedIn();
+      }
+    }
+
+    match /artifacts/{appId}/public/data/culture_day_bundles/{bundleId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    match /artifacts/{appId}/public/data/culture_day_ingest_jobs/{jobId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    match /artifacts/{appId}/public/data/submissions/{subId}/sites/{siteId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    match /artifacts/{appId}/users/{uid}/profile/{p} {
+      // 본인 프로필은 본인만 수정 가능, 메인관리자는 승인/인사정보 편집을 위해 타인 프로필도 수정 가능
+      allow read: if isSignedIn() && (myUid() == uid || isMainAdminOrBypass(appId));
+      allow write: if isSignedIn() && (myUid() == uid || isMainAdminOrBypass(appId));
+    }
+
+    match /artifacts/{appId}/users/{uid}/todos/{todoId} {
+      allow read, write: if isSignedIn() && myUid() == uid;
+    }
+
+    match /artifacts/{appId}/users/{uid} {
+      // 직원 목록(미러) — 로그인 사용자 읽기 허용, 쓰기는 본인 또는 메인관리자만
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (myUid() == uid || isMainAdminOrBypass(appId));
+    }
+  }
+}

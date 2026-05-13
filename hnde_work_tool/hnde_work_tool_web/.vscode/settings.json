@@ -1,0 +1,6 @@
+{
+  "dart.flutterRunAdditionalArgs": [
+    "--dart-define-from-file=env.worker",
+    "--web-port=5000"
+  ]
+}

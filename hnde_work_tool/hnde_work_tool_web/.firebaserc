@@ -1,0 +1,10 @@
+{
+  "projects": {
+    "default": "hnde-work-web",
+    "dev": "hnde-work-web",
+    "prod": "hnde-work-web",
+    "hnde-work": "hnde-work-web"
+  },
+  "targets": {},
+  "etags": {}
+}
