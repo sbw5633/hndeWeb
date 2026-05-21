@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import '../../constants/firestore_paths.dart';
 import '../../constants/role_constants.dart';
 import '../../constants/super_admin.dart';
+import '../../constants/worker_admin.dart';
 // AI 오버레이(_AiOverlay)에서만 사용 — 오버레이 주석 시 함께 복구
 // import '../common/loading_widget.dart';
 import '../../repositories/work_firestore_repository.dart';
@@ -559,17 +560,18 @@ class _WorkAppShellState extends State<WorkAppShell> with WidgetsBindingObserver
                               ),
                               if (!retired && mainAdmin) ...<Widget>[
                                 _groupLabel('관리', sidebarTextColor, _sidebarOpen, sidebarWidth),
-                                _navBtn(
-                                  context,
-                                  id: 'files',
-                                  icon: Icons.folder_open_rounded,
-                                  label: '파일 관리',
-                                  selected: menu == 'files',
-                                  expanded: _sidebarOpen,
-                                  sidebarWidth: sidebarWidth,
-                                  onTap: () => context.go('/files'),
-                                  sidebarTextColor: sidebarTextColor,
-                                ),
+                                if (WorkerAdmin.isWorkerAdmin(user?.uid))
+                                  _navBtn(
+                                    context,
+                                    id: 'files',
+                                    icon: Icons.folder_open_rounded,
+                                    label: '파일 관리',
+                                    selected: menu == 'files',
+                                    expanded: _sidebarOpen,
+                                    sidebarWidth: sidebarWidth,
+                                    onTap: () => context.go('/files'),
+                                    sidebarTextColor: sidebarTextColor,
+                                  ),
                                 _navBtn(
                                   context,
                                   id: 'admin-settings',

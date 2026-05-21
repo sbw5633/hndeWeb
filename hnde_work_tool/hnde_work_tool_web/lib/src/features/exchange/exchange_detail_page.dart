@@ -229,8 +229,16 @@ class _ExchangeDetailPageState extends State<ExchangeDetailPage> {
                       roleIdx: roleIdx,
                     ) ||
                     RoleConstants.canViewAllBranches(roleIdx));
+            /// mainAdmin: 본인이 만든 글이 아니어도 수신 현황 패널 노출(전 사업소 진행 확인/승인/재요청)
+            final bool isMainAdminViewer = uid != null &&
+                SuperAdmin.effectiveMainAdmin(
+                  profileMainAdmin: prof?['mainAdmin'],
+                  profileEmail: prof?['email'] as String?,
+                  authEmail: user?.email,
+                  roleIdx: roleIdx,
+                );
             final bool showRequesterPanel =
-                isRequesterViewer || isRequesterViewerLegacy;
+                isRequesterViewer || isRequesterViewerLegacy || isMainAdminViewer;
 
             if (profileRef != null &&
                 profSnap.connectionState == ConnectionState.waiting &&

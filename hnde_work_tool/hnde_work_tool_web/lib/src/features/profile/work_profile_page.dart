@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../../constants/super_admin.dart';
 import '../../repositories/work_firestore_repository.dart';
 import '../../models/branch_model.dart';
+import '../common/app_user_avatar.dart';
 import '../common/enterprise_scaffold.dart';
 import '../common/message_alert.dart';
 import '../common/merged_user_profile_stream_builder.dart';
@@ -251,30 +252,19 @@ class _WorkProfilePageState extends State<WorkProfilePage> {
                               color: Colors.grey.shade100,
                               border: Border.all(color: Colors.grey.shade200),
                             ),
-                            child: ClipOval(
-                              child: _localPhoto?.bytes != null
-                                  ? Image.memory(
-                                      _localPhoto!.bytes!,
-                                      fit: BoxFit.cover,
-                                    )
-                                  : (_photoUrl != null && _photoUrl!.isNotEmpty)
-                                      ? FutureBuilder<String>(
-                                          future: _repo.getPresignedViewUrl(_photoUrl!),
-                                          builder: (context, s2) {
-                                            if (!s2.hasData) {
-                                              return const Center(
-                                                child: SizedBox(
-                                                  width: 18,
-                                                  height: 18,
-                                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                                ),
-                                              );
-                                            }
-                                            return Image.network(s2.data!, fit: BoxFit.cover);
-                                          },
-                                        )
-                                      : const Icon(Icons.person, color: Colors.grey),
-                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: _localPhoto?.bytes != null
+                                ? Image.memory(
+                                    _localPhoto!.bytes!,
+                                    fit: BoxFit.cover,
+                                  )
+                                : AppUserAvatar(
+                                    size: 72,
+                                    photoUrl: _photoUrl,
+                                    fallbackText: _nameC.text,
+                                    backgroundColor: Colors.grey.shade100,
+                                    foregroundColor: Colors.grey,
+                                  ),
                           ),
                           const SizedBox(width: 16),
                           Expanded(
@@ -380,13 +370,6 @@ class _WorkProfilePageState extends State<WorkProfilePage> {
                         title: const Text('앱 설정'),
                         onTap: () => context.go('/my-settings'),
                       ),
-                      if (mainAdmin)
-                        ListTile(
-                          leading: const Icon(Icons.folder_open),
-                          title: const Text('파일 관리'),
-                          subtitle: const Text('메인 관리자 전용'),
-                          onTap: () => context.go('/files'),
-                        ),
                     ],
                   ),
                 ),

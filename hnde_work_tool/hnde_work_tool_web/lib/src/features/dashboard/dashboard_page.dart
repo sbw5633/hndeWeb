@@ -8,11 +8,14 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../constants/firestore_paths.dart';
+import '../../constants/super_admin.dart';
 import '../../theme/app_theme.dart';
+import '../../models/branch_model.dart';
 import '../../models/post_model.dart';
 import '../../models/submission_model.dart';
 import '../../models/todo_item_model.dart';
 import '../../repositories/work_firestore_repository.dart';
+import '../calendar/calendar_visibility.dart';
 import '../common/enterprise_scaffold.dart';
 
 const Color _navy = Color(0xFF1E3A8A);
@@ -1451,22 +1454,116 @@ class _Timeline extends StatelessWidget {
           const SizedBox(height: 40),
           SizedBox(
             height: 320,
-            child: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: repo.watchUpcomingEvents(),
+            child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+              stream: () {
+                final String? uid = FirebaseAuth.instance.currentUser?.uid;
+                if (uid == null) {
+                  return const Stream<
+                      DocumentSnapshot<Map<String, dynamic>>>.empty();
+                }
+                return FirestorePaths.userProfileMainDoc(uid).snapshots();
+              }(),
               builder: (
                 BuildContext context,
-                AsyncSnapshot<List<Map<String, dynamic>>> snap,
+                AsyncSnapshot<DocumentSnapshot<Map<String, dynamic>>> profSnap,
               ) {
-                final List<Map<String, dynamic>> events =
-                    snap.data ?? <Map<String, dynamic>>[];
-                if (events.isEmpty) {
-                  return Center(
-                    child: Text(
-                      '예정된 일정이 없습니다.',
-                      style: TextStyle(color: _slate400, fontSize: 13),
-                    ),
-                  );
-                }
+                final Map<String, dynamic> prof =
+                    profSnap.data?.data() ?? <String, dynamic>{};
+                final int roleIdx =
+                    (prof['roleIdx'] as num?)?.toInt() ?? 999;
+                final bool isMainAdmin = SuperAdmin.effectiveMainAdmin(
+                  profileMainAdmin: prof['mainAdmin'],
+                  profileEmail: prof['email'] as String?,
+                  authEmail: FirebaseAuth.instance.currentUser?.email,
+                  roleIdx: roleIdx,
+                );
+                final String myUid =
+                    FirebaseAuth.instance.currentUser?.uid ?? '';
+                final String profileBranch =
+                    (prof['branchName'] as String?)?.trim().isNotEmpty == true
+                        ? (prof['branchName'] as String).trim()
+                        : (prof['branch'] as String?)?.trim() ?? '';
+
+                return StreamBuilder<List<BranchModel>>(
+                  stream: repo.watchBranches(),
+                  builder: (
+                    BuildContext context,
+                    AsyncSnapshot<List<BranchModel>> branchSnap,
+                  ) {
+                    final List<BranchModel> branches =
+                        branchSnap.data ?? <BranchModel>[];
+                    String myBranchId = '';
+                    String myBranchName = profileBranch;
+                    for (final BranchModel b in branches) {
+                      if (b.id == profileBranch || b.name == profileBranch) {
+                        myBranchId = b.id;
+                        myBranchName = b.name;
+                        break;
+                      }
+                    }
+                    return _TimelineEvents(
+                      repo: repo,
+                      isMainAdmin: isMainAdmin,
+                      myUid: myUid,
+                      myBranchId: myBranchId,
+                      myBranchName: myBranchName,
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TimelineEvents extends StatelessWidget {
+  const _TimelineEvents({
+    required this.repo,
+    required this.isMainAdmin,
+    required this.myUid,
+    required this.myBranchId,
+    required this.myBranchName,
+  });
+
+  final WorkFirestoreRepository repo;
+  final bool isMainAdmin;
+  final String myUid;
+  final String myBranchId;
+  final String myBranchName;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: repo.watchUpcomingEvents(limit: 60),
+      builder: (
+        BuildContext context,
+        AsyncSnapshot<List<Map<String, dynamic>>> snap,
+      ) {
+        final List<Map<String, dynamic>> rawEvents =
+            snap.data ?? <Map<String, dynamic>>[];
+        final List<Map<String, dynamic>> events = rawEvents
+            .where(
+              (Map<String, dynamic> e) => isCalendarEventVisibleTo(
+                e,
+                isMainAdmin: isMainAdmin,
+                myUid: myUid,
+                myBranchId: myBranchId,
+                myBranchName: myBranchName,
+              ),
+            )
+            .take(20)
+            .toList();
+        if (events.isEmpty) {
+          return Center(
+            child: Text(
+              '예정된 일정이 없습니다.',
+              style: TextStyle(color: _slate400, fontSize: 13),
+            ),
+          );
+        }
                 return ListView.separated(
                   itemCount: events.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 24),
@@ -1600,11 +1697,7 @@ class _Timeline extends StatelessWidget {
                   },
                 );
               },
-            ),
-          ),
-        ],
-      ),
-    );
+            );
   }
 }
 

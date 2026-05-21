@@ -13,6 +13,7 @@ import 'dart:async';
 import '../../models/chat_message_model.dart';
 import '../../models/conversation_room_model.dart';
 import '../../repositories/work_firestore_repository.dart';
+import '../../services/r2_storage_service.dart';
 import 'messenger_dock_controller.dart';
 
 String _messengerStaffDisplayName(Map<String, dynamic> s) {
@@ -85,7 +86,7 @@ String _staffPresenceLabel(Map<String, dynamic> s) {
 }
 
 /// 메신저 직원 목록·프로필 카드용 원형 사진
-class _MessengerStaffAvatar extends StatelessWidget {
+class _MessengerStaffAvatar extends StatefulWidget {
   const _MessengerStaffAvatar(
     this.staff, {
     this.size = 40,
@@ -99,20 +100,63 @@ class _MessengerStaffAvatar extends StatelessWidget {
   final double borderWidth;
 
   @override
+  State<_MessengerStaffAvatar> createState() => _MessengerStaffAvatarState();
+}
+
+class _MessengerStaffAvatarState extends State<_MessengerStaffAvatar> {
+  String? _resolvedFor;
+  Future<String?>? _displayUrlFuture;
+  String? _cacheKey;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _resolveIfNeeded();
+  }
+
+  @override
+  void didUpdateWidget(covariant _MessengerStaffAvatar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final String oldU = _messengerStaffPhotoUrl(oldWidget.staff) ?? '';
+    final String newU = _messengerStaffPhotoUrl(widget.staff) ?? '';
+    if (oldU != newU) _resolveIfNeeded(force: true);
+  }
+
+  void _resolveIfNeeded({bool force = false}) {
+    final String url = _messengerStaffPhotoUrl(widget.staff) ?? '';
+    if (!force && _resolvedFor == url) return;
+    _resolvedFor = url;
+    if (url.isEmpty) {
+      _displayUrlFuture = null;
+      _cacheKey = null;
+      return;
+    }
+    final String? key = R2StorageService.fileKeyFromUrl(url);
+    if (key == null || key.trim().isEmpty) {
+      _displayUrlFuture = Future<String?>.value(url);
+      _cacheKey = url;
+      return;
+    }
+    final WorkFirestoreRepository repo =
+        context.read<WorkFirestoreRepository>();
+    _displayUrlFuture = repo.getPresignedViewUrl(url);
+    _cacheKey = key;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final String? url = _messengerStaffPhotoUrl(staff);
-    final String name = _messengerStaffDisplayName(staff);
+    final String name = _messengerStaffDisplayName(widget.staff);
     final String initials = _messengerStaffInitials(name);
 
     return Container(
-      width: size,
-      height: size,
+      width: widget.size,
+      height: widget.size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: const Color(0xFFF1F5F9),
         border: Border.all(
-          color: borderColor ?? const Color(0xFFE2E8F0),
-          width: borderWidth,
+          color: widget.borderColor ?? const Color(0xFFE2E8F0),
+          width: widget.borderWidth,
         ),
         boxShadow: <BoxShadow>[
           BoxShadow(
@@ -123,27 +167,56 @@ class _MessengerStaffAvatar extends StatelessWidget {
         ],
       ),
       clipBehavior: Clip.antiAlias,
-      child: url != null
-          ? CachedNetworkImage(
-              imageUrl: url,
-              fit: BoxFit.cover,
-              width: size,
-              height: size,
-              fadeInDuration: const Duration(milliseconds: 150),
-              placeholder: (BuildContext _, String __) => Center(
-                child: SizedBox(
-                  width: size * 0.38,
-                  height: size * 0.38,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.blue.shade300,
+      child: _displayUrlFuture == null
+          ? _MessengerInitialsFill(size: widget.size, initials: initials)
+          : FutureBuilder<String?>(
+              future: _displayUrlFuture,
+              builder: (BuildContext context, AsyncSnapshot<String?> snap) {
+                if (snap.connectionState == ConnectionState.waiting &&
+                    !snap.hasData) {
+                  return Center(
+                    child: SizedBox(
+                      width: widget.size * 0.38,
+                      height: widget.size * 0.38,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.blue.shade300,
+                      ),
+                    ),
+                  );
+                }
+                final String? resolved = snap.data?.trim();
+                if (resolved == null || resolved.isEmpty || snap.hasError) {
+                  return _MessengerInitialsFill(
+                    size: widget.size,
+                    initials: initials,
+                  );
+                }
+                return CachedNetworkImage(
+                  imageUrl: resolved,
+                  cacheKey: _cacheKey,
+                  fit: BoxFit.cover,
+                  width: widget.size,
+                  height: widget.size,
+                  fadeInDuration: const Duration(milliseconds: 150),
+                  placeholder: (BuildContext _, String __) => Center(
+                    child: SizedBox(
+                      width: widget.size * 0.38,
+                      height: widget.size * 0.38,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.blue.shade300,
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              errorWidget: (BuildContext _, String __, Object ___) =>
-                  _MessengerInitialsFill(size: size, initials: initials),
-            )
-          : _MessengerInitialsFill(size: size, initials: initials),
+                  errorWidget: (BuildContext _, String __, Object ___) =>
+                      _MessengerInitialsFill(
+                    size: widget.size,
+                    initials: initials,
+                  ),
+                );
+              },
+            ),
     );
   }
 }

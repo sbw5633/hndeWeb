@@ -6,6 +6,7 @@ class EnterpriseScaffold extends StatelessWidget {
   const EnterpriseScaffold({
     required this.title,
     required this.child,
+    this.useFullWidth = false,
     super.key,
   });
 
@@ -13,11 +14,16 @@ class EnterpriseScaffold extends StatelessWidget {
   final String title;
   final Widget child;
 
+  /// `true`이면 본문이 브라우저 가로 전체를 씁니다(기본은 1440px 상한).
+  final bool useFullWidth;
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
-        final double w = constraints.maxWidth > 1440 ? 1440 : constraints.maxWidth;
+        final double w = useFullWidth
+            ? constraints.maxWidth
+            : (constraints.maxWidth > 1440 ? 1440 : constraints.maxWidth);
         return Align(
           alignment: Alignment.topCenter,
           child: SizedBox(

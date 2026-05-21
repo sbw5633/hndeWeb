@@ -1136,7 +1136,10 @@ class WorkFirestoreRepository {
     }
     final Map<String, dynamic> old = oldSnap.data() ?? <String, dynamic>{};
     final String authorUid = (old['authorUid'] as String?)?.trim() ?? '';
-    if (authorUid.isEmpty || authorUid != uid) {
+    final bool isAuthor = authorUid.isNotEmpty && authorUid == uid;
+    final int roleIdx = await _myRoleIdx();
+    final bool isAdmin = _isDeleteAdminRoleIdx(roleIdx);
+    if (!isAuthor && !isAdmin) {
       throw StateError('수정 권한이 없습니다.');
     }
     final String boardType = (old['boardType'] as String?)?.trim().isNotEmpty == true
@@ -1165,13 +1168,24 @@ class WorkFirestoreRepository {
         FirestorePaths.userProfileMainDoc(uid);
     final DocumentSnapshot<Map<String, dynamic>> prof = await userMain.get();
     final Map<String, dynamic> p = prof.data() ?? <String, dynamic>{};
-    final String display =
+    final String myDisplay =
         '${p['name'] ?? ''} ${p['position'] ?? ''}'.trim().isEmpty
             ? (_auth.currentUser?.email ?? '사용자')
             : '${p['name'] ?? ''} ${p['position'] ?? ''}'.trim();
-    final String? photoUrl = (p['photoUrl'] as String?)?.trim().isNotEmpty == true
-        ? (p['photoUrl'] as String).trim()
-        : null;
+    final String? myPhotoUrl =
+        (p['photoUrl'] as String?)?.trim().isNotEmpty == true
+            ? (p['photoUrl'] as String).trim()
+            : null;
+    /// 관리자가 다른 사람 글을 수정하는 경우 원작성자 정보 보존.
+    final bool keepOriginalAuthor = isAdmin && !isAuthor;
+    final String preservedAuthorUid =
+        keepOriginalAuthor ? authorUid : uid;
+    final String preservedAuthorDisplay = keepOriginalAuthor
+        ? ((old['authorDisplay'] as String?) ?? myDisplay)
+        : (old['authorDisplay'] == '익명' ? '익명' : myDisplay);
+    final String? preservedAuthorPhotoUrl = keepOriginalAuthor
+        ? (old['authorPhotoUrl'] as String?)
+        : (old['authorDisplay'] == '익명' ? null : myPhotoUrl);
 
     final DocumentReference<Map<String, dynamic>> newRef =
         FirestorePaths.postsCol().doc();
@@ -1180,11 +1194,15 @@ class WorkFirestoreRepository {
       'title': t,
       'body': b,
       'boardType': boardType,
-      'authorUid': uid,
-      'authorDisplay': old['authorDisplay'] == '익명' ? '익명' : display,
-      if (old['authorDisplay'] == '익명') 'authorPhotoUrl': null else if (photoUrl != null) 'authorPhotoUrl': photoUrl,
+      'authorUid': preservedAuthorUid,
+      'authorDisplay': preservedAuthorDisplay,
+      if (preservedAuthorPhotoUrl != null)
+        'authorPhotoUrl': preservedAuthorPhotoUrl
+      else
+        'authorPhotoUrl': null,
       'createdAt': FieldValue.serverTimestamp(),
       'editedAt': FieldValue.serverTimestamp(),
+      if (keepOriginalAuthor) 'editedByUid': uid,
       'readCount': 0,
       'isOfficial': isOfficial,
       if (oldUrls.isNotEmpty) 'imageUrls': oldUrls,
@@ -1213,56 +1231,70 @@ class WorkFirestoreRepository {
 
   /// 로그아웃 등으로 `currentUser`가 바뀌면 Firestore 스트림이 끊기지 않고
   /// `await for`가 영원히 대기하는 경우가 있어, 인증 상태와 함께 강제로 닫습니다.
+  ///
+  /// 구독 취소는 **동일 스택에서 리스너 본인을 cancel하지 않도록** 마이크로태스크로
+  /// 지연합니다. (웹 등에서 `authStateChanges` 콜백 안 `subAuth.cancel()` 시 UI 멈춤 방지)
   Stream<T> _guardFirestoreStreamWithAuth<T>(String boundUid, Stream<T> inner) {
     StreamSubscription<T>? subInner;
     StreamSubscription<User?>? subAuth;
 
     late final StreamController<T> controller;
 
-    void shutdown() {
-      subInner?.cancel();
-      subAuth?.cancel();
+    void cancelBindingsInMicrotask({
+      required bool closeController,
+      Object? error,
+      StackTrace? stack,
+    }) {
+      final StreamSubscription<T>? innerSub = subInner;
+      final StreamSubscription<User?>? authSub = subAuth;
       subInner = null;
       subAuth = null;
-    }
-
-    void safeClose() {
-      if (!controller.isClosed) {
-        controller.close();
-      }
+      scheduleMicrotask(() {
+        try {
+          innerSub?.cancel();
+        } catch (_) {}
+        try {
+          authSub?.cancel();
+        } catch (_) {}
+        if (!controller.isClosed) {
+          if (error != null && stack != null) {
+            controller.addError(error, stack);
+          } else if (closeController) {
+            controller.close();
+          }
+        }
+      });
     }
 
     controller = StreamController<T>(
       onListen: () {
         subAuth = _auth.authStateChanges().listen((User? u) {
           if (u?.uid != boundUid) {
-            shutdown();
-            safeClose();
+            cancelBindingsInMicrotask(closeController: true);
           }
         });
         subInner = inner.listen(
           (T event) {
             if (_auth.currentUser?.uid != boundUid) {
-              shutdown();
-              safeClose();
+              cancelBindingsInMicrotask(closeController: true);
               return;
             }
             controller.add(event);
           },
           onError: (Object e, StackTrace st) {
-            shutdown();
-            if (!controller.isClosed) {
-              controller.addError(e, st);
-            }
+            cancelBindingsInMicrotask(
+              closeController: false,
+              error: e,
+              stack: st,
+            );
           },
           onDone: () {
-            shutdown();
-            safeClose();
+            cancelBindingsInMicrotask(closeController: true);
           },
           cancelOnError: false,
         );
       },
-      onCancel: shutdown,
+      onCancel: () => cancelBindingsInMicrotask(closeController: false),
     );
 
     return controller.stream;
@@ -1946,37 +1978,90 @@ class WorkFirestoreRepository {
     required String scope,
     required String titleText,
     String? branchName,
+    List<String> branchNames = const <String>[],
   }) async {
-    if (scope == 'company') {
-      // 요구사항: 본인/본인 사업소 관련만 알림. 전사 알림은 생성하지 않음.
-      return;
-    }
-    final List<String> branchNames = <String>[];
+    final List<String> resolvedBranchNames = <String>[];
     final List<String> targets = <String>[];
-    if (scope == 'branch') {
-      final String b = (branchName ?? '').trim();
-      if (b.isNotEmpty) branchNames.add(b);
-    } else if (scope == 'private') {
-      final String? uid = _uid;
-      if (uid != null) targets.add(uid);
+    if (scope == 'company') {
+      resolvedBranchNames.add(_kAllBranchesToken);
+    } else if (scope == 'branch') {
+      for (final String b in branchNames) {
+        final String t = b.trim();
+        if (t.isNotEmpty && !resolvedBranchNames.contains(t)) {
+          resolvedBranchNames.add(t);
+        }
+      }
+      final String legacy = (branchName ?? '').trim();
+      if (legacy.isNotEmpty && !resolvedBranchNames.contains(legacy)) {
+        resolvedBranchNames.add(legacy);
+      }
     } else {
+      // private
       final String? uid = _uid;
       if (uid != null) targets.add(uid);
     }
 
-    if (branchNames.isEmpty && targets.isEmpty) return;
+    if (resolvedBranchNames.isEmpty && targets.isEmpty) return;
 
     await _writePublicNotificationDoc(
       type: 'calendar_event_created',
       title: '새 일정',
-      body: titleText.trim().isEmpty ? '일정이 등록되었습니다.' : '「${titleText.trim()}」 일정이 등록되었습니다.',
-      branchNames: branchNames,
+      body: titleText.trim().isEmpty
+          ? '일정이 등록되었습니다.'
+          : '「${titleText.trim()}」 일정이 등록되었습니다.',
+      branchNames: resolvedBranchNames,
       targetUids: targets,
       payload: <String, dynamic>{
         'calendarEventId': eventId,
         'scope': scope,
       },
     );
+  }
+
+  /// 일정 수정. mainAdmin 또는 본인 작성자만 가능(클라이언트 가드).
+  Future<void> updateCalendarEvent(
+    String eventId,
+    Map<String, dynamic> updates,
+  ) async {
+    final String? uid = _uid;
+    if (uid == null) throw StateError('로그인 필요');
+    final DocumentReference<Map<String, dynamic>> ref =
+        FirestorePaths.calendarEventsCol().doc(eventId);
+    final DocumentSnapshot<Map<String, dynamic>> snap = await ref.get();
+    if (!snap.exists) throw StateError('일정을 찾을 수 없습니다.');
+    final Map<String, dynamic> d = snap.data() ?? <String, dynamic>{};
+    final String owner = (d['createdByUid'] as String?)?.trim() ?? '';
+    final bool isAuthor = owner.isNotEmpty && owner == uid;
+    final int roleIdx = await _myRoleIdx();
+    final bool isAdmin = _isDeleteAdminRoleIdx(roleIdx);
+    if (!isAuthor && !isAdmin) {
+      throw StateError('수정 권한이 없습니다.');
+    }
+    final Map<String, dynamic> payload = <String, dynamic>{
+      ...updates,
+      'updatedAt': FieldValue.serverTimestamp(),
+      'updatedByUid': uid,
+    };
+    await ref.set(payload, SetOptions(merge: true));
+  }
+
+  /// 일정 삭제. mainAdmin 또는 본인 작성자만 가능.
+  Future<void> deleteCalendarEvent(String eventId) async {
+    final String? uid = _uid;
+    if (uid == null) throw StateError('로그인 필요');
+    final DocumentReference<Map<String, dynamic>> ref =
+        FirestorePaths.calendarEventsCol().doc(eventId);
+    final DocumentSnapshot<Map<String, dynamic>> snap = await ref.get();
+    if (!snap.exists) return;
+    final Map<String, dynamic> d = snap.data() ?? <String, dynamic>{};
+    final String owner = (d['createdByUid'] as String?)?.trim() ?? '';
+    final bool isAuthor = owner.isNotEmpty && owner == uid;
+    final int roleIdx = await _myRoleIdx();
+    final bool isAdmin = _isDeleteAdminRoleIdx(roleIdx);
+    if (!isAuthor && !isAdmin) {
+      throw StateError('삭제 권한이 없습니다.');
+    }
+    await ref.delete();
   }
 
   static int _conversationRecencyMs(ConversationRoomModel r) {

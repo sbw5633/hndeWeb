@@ -69,6 +69,12 @@ class KakaoLocalService {
     );
     final Object? decoded = _decodeJson(res.body);
     if (res.statusCode != 200) {
+      // 구버전 Worker일 때 catch-all 404 처리 — 빈 결과 폴백.
+      if (res.statusCode == 404 &&
+          decoded is Map<String, dynamic> &&
+          decoded['error'] == 'not_found') {
+        return <KakaoAddressPick>[];
+      }
       _throwIfBadResponse(
         res,
         viaProxy: KakaoApiConfig.effectiveAddressProxyUrl.isNotEmpty,
@@ -91,6 +97,15 @@ class KakaoLocalService {
     );
     final Object? decoded = _decodeJson(res.body);
     if (res.statusCode != 200) {
+      // 구버전 Worker(`/v1/kakao/keyword` 미배포)일 때 발생하는 404 catch-all 응답:
+      // `{"error":"not_found"}` — 사용자는 주소 검색만 되어도 충분하므로
+      // 키워드 결과만 빈 배열로 폴백하고 주소 검색은 계속 진행한다.
+      // (해결: `cd cloudflare-worker && npx wrangler deploy`)
+      if (res.statusCode == 404 &&
+          decoded is Map<String, dynamic> &&
+          decoded['error'] == 'not_found') {
+        return <KakaoAddressPick>[];
+      }
       if (decoded is Map<String, dynamic> &&
           decoded['error'] == 'kakao_upstream') {
         final String body = decoded['kakaoBody']?.toString() ?? '';

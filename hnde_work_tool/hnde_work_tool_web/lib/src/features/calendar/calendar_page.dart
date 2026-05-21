@@ -8,12 +8,15 @@ import 'package:table_calendar/table_calendar.dart';
 import 'package:provider/provider.dart';
 
 import '../../constants/firestore_paths.dart';
+import '../../constants/super_admin.dart';
 import '../../repositories/work_firestore_repository.dart';
 import '../../models/branch_model.dart';
 import '../common/enterprise_scaffold.dart';
 import '../common/loading_widget.dart';
+import '../common/message_alert.dart';
 import 'calendar_day_keys.dart';
 import 'calendar_schedule_modal.dart';
+import 'calendar_visibility.dart';
 import 'korean_holidays.dart';
 
 class CalendarPage extends StatefulWidget {
@@ -520,6 +523,15 @@ class _CalendarPageState extends State<CalendarPage> {
                       final BranchModel? branch =
                           _resolveUserBranch(prof, branches);
                       final String branchName = branch?.name ?? '사업소';
+                      final int roleIdx =
+                          (prof?['roleIdx'] as num?)?.toInt() ?? 999;
+                      final bool isMainAdmin = SuperAdmin.effectiveMainAdmin(
+                        profileMainAdmin: prof?['mainAdmin'],
+                        profileEmail: prof?['email'] as String?,
+                        authEmail:
+                            FirebaseAuth.instance.currentUser?.email,
+                        roleIdx: roleIdx,
+                      );
 
                       return ElevatedButton.icon(
                         onPressed: () async {
@@ -529,6 +541,8 @@ class _CalendarPageState extends State<CalendarPage> {
                             context,
                             baseDate: baseDate,
                             branchName: branchName,
+                            isMainAdmin: isMainAdmin,
+                            branches: branches,
                           );
                         },
                         icon: const Icon(Icons.add, size: 18),
@@ -658,6 +672,16 @@ class _CalendarPageState extends State<CalendarPage> {
                               final BranchModel? branch = _resolveUserBranch(prof, branches);
                               final String myBranchId = branch?.id ?? '';
                               final String myBranchName = branch?.name ?? '';
+                              final int roleIdx =
+                                  (prof?['roleIdx'] as num?)?.toInt() ?? 999;
+                              final bool isMainAdmin =
+                                  SuperAdmin.effectiveMainAdmin(
+                                profileMainAdmin: prof?['mainAdmin'],
+                                profileEmail: prof?['email'] as String?,
+                                authEmail:
+                                    FirebaseAuth.instance.currentUser?.email,
+                                roleIdx: roleIdx,
+                              );
 
                               return _CalendarEventList(
                                 selectedDay: _selectedDay,
@@ -667,12 +691,17 @@ class _CalendarPageState extends State<CalendarPage> {
                                 myUid: uid,
                                 myBranchId: myBranchId,
                                 myBranchName: myBranchName,
+                                isMainAdmin: isMainAdmin,
+                                allBranches: branches,
+                                repo: _repo,
                                 onAddEvent: () async {
                                   final DateTime baseDate = _selectedDay ?? _todayDateOnly();
                                   await showCalendarScheduleModal(
                                     context,
                                     baseDate: baseDate,
                                     branchName: myBranchName.isNotEmpty ? myBranchName : '사업소',
+                                    isMainAdmin: isMainAdmin,
+                                    branches: branches,
                                   );
                                 },
                               );
@@ -701,6 +730,9 @@ class _CalendarEventList extends StatelessWidget {
     this.myUid,
     this.myBranchId = '',
     this.myBranchName = '',
+    this.isMainAdmin = false,
+    this.allBranches = const <BranchModel>[],
+    required this.repo,
     required this.onAddEvent,
   });
 
@@ -711,28 +743,92 @@ class _CalendarEventList extends StatelessWidget {
   final String? myUid;
   final String myBranchId;
   final String myBranchName;
+  final bool isMainAdmin;
+  final List<BranchModel> allBranches;
+  final WorkFirestoreRepository repo;
   final VoidCallback onAddEvent;
 
   bool _isVisibleToMe(Map<String, dynamic> data) {
+    return isCalendarEventVisibleTo(
+      data,
+      isMainAdmin: isMainAdmin,
+      myUid: myUid ?? '',
+      myBranchId: myBranchId,
+      myBranchName: myBranchName,
+    );
+  }
+
+  bool _canEdit(Map<String, dynamic> data) {
+    if (isMainAdmin) return true;
+    final String owner = (data['createdByUid'] as String?)?.trim() ?? '';
+    final String me = (myUid ?? '').trim();
+    return me.isNotEmpty && owner.isNotEmpty && owner == me;
+  }
+
+  String _visibilityLabel(Map<String, dynamic> data) {
     final String scope = (data['scope'] as String?)?.trim() ?? 'private';
-    if (scope == 'private') {
-      final String owner = (data['createdByUid'] as String?)?.trim() ?? '';
-      final String me = (myUid ?? '').trim();
-      return me.isNotEmpty && owner.isNotEmpty && owner == me;
-    }
-    if (scope == 'branch') {
-      final String eventBranch = (data['branchName'] as String?)?.trim() ?? '';
-      if (eventBranch.isEmpty) return false;
-      if (myBranchName.trim().isNotEmpty && eventBranch == myBranchName.trim()) {
-        return true;
+    if (scope == 'private') return '개인일정';
+    if (scope == 'company') return '전사 일정';
+    final List<String> targets = <String>[];
+    final dynamic raw = data['targetBranches'];
+    if (raw is List) {
+      for (final dynamic e in raw) {
+        if (e is String && e.trim().isNotEmpty) targets.add(e.trim());
       }
-      if (myBranchId.trim().isNotEmpty && eventBranch == myBranchId.trim()) {
-        return true;
-      }
-      return false;
     }
-    // 요구사항: 본인/본인 사업소 관련만 표시. 전사(company) 등은 숨김.
-    return false;
+    final String single = (data['branchName'] as String?)?.trim() ?? '';
+    if (single.isNotEmpty && !targets.contains(single)) {
+      targets.add(single);
+    }
+    if (targets.isEmpty) return '사업소 일정';
+    if (targets.length == 1) return '${targets.first} 일정';
+    return '${targets.first} 외 ${targets.length - 1}개 사업소 일정';
+  }
+
+  Future<void> _confirmDelete(
+    BuildContext context,
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) async {
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      useRootNavigator: false,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('일정 삭제'),
+        content: const Text('선택한 일정을 삭제하시겠습니까?'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('취소'),
+          ),
+          FilledButton.tonal(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(
+              foregroundColor: Colors.red.shade700,
+            ),
+            child: const Text('삭제'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await repo.deleteCalendarEvent(doc.id);
+      if (context.mounted) {
+        await showMessageAlert(
+          context,
+          message: '일정이 삭제되었습니다.',
+          title: '삭제 완료',
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        await showMessageAlert(
+          context,
+          message: '삭제 중 오류: $e',
+          title: '오류',
+        );
+      }
+    }
   }
 
   @override
@@ -805,16 +901,12 @@ class _CalendarEventList extends StatelessWidget {
             ),
           );
         }
-        final Map<String, dynamic> data = forDay[index].data();
+        final QueryDocumentSnapshot<Map<String, dynamic>> doc = forDay[index];
+        final Map<String, dynamic> data = doc.data();
         final String title = data['title'] as String? ?? '제목 없음';
         final String content = data['content'] as String? ?? '';
-        final String scope = data['scope'] as String? ?? 'private';
-        final String branchName = data['branchName'] as String? ?? '';
-        final String visibility = scope == 'private'
-            ? '개인일정'
-            : scope == 'branch'
-                ? (branchName.isNotEmpty ? '$branchName 일정' : '사업소 일정')
-                : '전사일정';
+        final String visibility = _visibilityLabel(data);
+        final bool canEdit = _canEdit(data);
 
         return ListTile(
           contentPadding: const EdgeInsets.symmetric(horizontal: 8),
@@ -827,6 +919,39 @@ class _CalendarEventList extends StatelessWidget {
             maxLines: 3,
             overflow: TextOverflow.ellipsis,
           ),
+          trailing: canEdit
+              ? Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    IconButton(
+                      tooltip: '수정',
+                      icon: const Icon(Icons.edit_outlined, size: 18),
+                      onPressed: () async {
+                        await showCalendarScheduleModal(
+                          context,
+                          baseDate: selectedDay ?? DateTime.now(),
+                          branchName: myBranchName.isNotEmpty
+                              ? myBranchName
+                              : '사업소',
+                          isMainAdmin: isMainAdmin,
+                          branches: allBranches,
+                          editEventId: doc.id,
+                          existingData: data,
+                        );
+                      },
+                    ),
+                    IconButton(
+                      tooltip: '삭제',
+                      icon: Icon(
+                        Icons.delete_outline,
+                        size: 18,
+                        color: Colors.red.shade700,
+                      ),
+                      onPressed: () => _confirmDelete(context, doc),
+                    ),
+                  ],
+                )
+              : null,
         );
       },
       separatorBuilder: (_, __) => const Divider(height: 1),

@@ -5,13 +5,14 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:excel/excel.dart';
+import 'package:excel/excel.dart' hide Border;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../constants/firestore_paths.dart';
 import '../../constants/role_constants.dart';
@@ -24,6 +25,69 @@ import '../../utils/save_xlsx.dart';
 import '../common/enterprise_scaffold.dart';
 import '../common/message_alert.dart';
 import '../common/merged_user_profile_stream_builder.dart';
+
+const Color _navy = Color(0xFF1E3A8A);
+
+const String _kTooltipSeparationReason =
+    '1.회사의 사정에 의한 이직(폐업 등)\n2.부득이한 개인 사정(질병 등)\n3.기타 개인사정(전직 등)';
+const String _kTooltipPremiumReason =
+    '해당자만 기재\n보험료 부과구분 링크 참고';
+const String _kTooltipJobCode =
+    '직종은 공통코드표의 직종분류를 참고해 입력하세요. 우측 아이콘으로 코드표를 열 수 있습니다.';
+const String _kTooltipNationalityStay =
+    '국적·체류자격은 공통코드표를 참고해 입력하세요. 우측 아이콘으로 코드표를 열 수 있습니다.';
+const String _kTooltipDayNav = 'Tab키 이동, Space 선택';
+
+const String _k4insureCodeListBase =
+    'http://www.4insure.or.kr/pbiz/cmmn/selectComCdList.do?comCdClsfId=';
+
+Future<void> _launch4insureCodeRef(String comCdClsfId) async {
+  final Uri uri = Uri.parse('$_k4insureCodeListBase$comCdClsfId');
+  await launchUrl(uri, webOnlyWindowName: '_blank');
+}
+
+/// 4대보험 공통코드 조회(새 창).
+class _CodeRefIconButton extends StatelessWidget {
+  const _CodeRefIconButton({
+    required this.comCdClsfId,
+    this.tooltip,
+  });
+
+  final String comCdClsfId;
+  final String? tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+      tooltip: tooltip ?? '코드 조회 (새 창)',
+      icon: const Icon(Icons.open_in_new, size: 17),
+      onPressed: () => _launch4insureCodeRef(comCdClsfId),
+    );
+  }
+}
+
+InputDecoration _dwOutlineDecoration({required bool enabled}) {
+  const Color borderColor = Color(0xFFCBD5E1);
+  return InputDecoration(
+    isDense: true,
+    counterText: '',
+    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+    filled: true,
+    fillColor: enabled ? Colors.white : const Color(0xFFF1F5F9),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: const BorderSide(color: borderColor),
+    ),
+    disabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide(color: Colors.grey.shade300),
+    ),
+  );
+}
 
 /// 테스트/더미용: 숫자만 모아 13자리 저장 키로 맞춤(체크섬 검증 없음). Firestore·캐시는 13자리만 수용합니다.
 String _normalizeDummyRrnToKey(String raw) {
@@ -47,22 +111,6 @@ String _normalizeDummyRrnToKey(String raw) {
 /// 근무일 확인 다이얼로그에서 «전체 사업소» 필터용.
 const String _kAllBranchesMonthlyFilter = '__ALL_BRANCHES__';
 
-/// Excel 1-based column index (A=1, B=2, …, K=11) → column letters (…, Z, AA, …).
-String _excelColumnLettersFromIndex1Based(int col1Based) {
-  final StringBuffer buf = StringBuffer();
-  int n = col1Based;
-  while (n > 0) {
-    final int rem = (n - 1) % 26;
-    buf.writeCharCode(65 + rem);
-    n = (n - 1) ~/ 26;
-  }
-  return buf.toString().split('').reversed.join();
-}
-
-/// 25.05.29 이후 전자신고용 근로내용확인신고 양식(사용자 제공 2025년 5월본 기준).
-const String _kDailyWorkerElectroTemplateAsset =
-    'assets/insurance/daily_worker_electronic_template.xlsx';
-
 class DailyWorkerPage extends StatefulWidget {
   const DailyWorkerPage({super.key});
 
@@ -70,9 +118,16 @@ class DailyWorkerPage extends StatefulWidget {
   State<DailyWorkerPage> createState() => _DailyWorkerPageState();
 }
 
-class _DailyWorkerPageState extends State<DailyWorkerPage> {
-  final List<_DailyWorkerRow> _rows = <_DailyWorkerRow>[];
+class _DailyWorkerPageState extends State<DailyWorkerPage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  final List<Worker> _rows = <Worker>[];
   late final ScrollController _horizontalScroll;
+  final TextEditingController _bulkPayMonth = TextEditingController();
+  final GlobalKey<_BulkApplyPanelState> _bulkApplyPanelKey =
+      GlobalKey<_BulkApplyPanelState>();
   DateTime _attributionMonth = DateTime(
     DateTime.now().year,
     DateTime.now().month,
@@ -91,24 +146,134 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
       <String, Map<String, String>>{};
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _dailyWorkersSub;
   bool _dailyCacheReady = false;
+  Timer? _firestoreHistoryPrefsDebounce;
+  Timer? _formHistoryPrefsDebounce;
+  /// 근무이력 로컬 캐시(SharedPreferences) 저장: 입력 중에는 디바운스 후에만 실행.
+  static const Duration _kFormHistoryPrefsDebounce = Duration(milliseconds: 2000);
+  static const Duration _kFirestoreHistoryPrefsDebounce = Duration(milliseconds: 1600);
 
   @override
   void initState() {
     super.initState();
     _horizontalScroll = ScrollController();
-    _rows.add(_DailyWorkerRow());
-    _warmDailyHistoryCache();
+    _bulkPayMonth.text =
+        '${_attributionMonth.year}${_attributionMonth.month.toString().padLeft(2, '0')}';
+    _rows.add(Worker());
+    // 로컬 캐시를 먼저 반영한 뒤에만 Firestore 구독을 시작해(동시 microtask 경쟁 방지) UI·데이터 순서를 보장.
+    Future<void>.microtask(() async {
+      await _loadDailyHistoryCacheFromPrefs();
+      if (mounted) {
+        setState(() {});
+      }
+      await _attachDailyWorkersRemoteListener();
+    });
   }
 
   @override
   void dispose() {
+    _firestoreHistoryPrefsDebounce?.cancel();
+    _formHistoryPrefsDebounce?.cancel();
     _dailyWorkersSub?.cancel();
     _horizontalScroll.dispose();
+    _bulkPayMonth.dispose();
+    for (final Worker w in _rows) {
+      w.dispose();
+    }
     super.dispose();
   }
 
   Map<String, Map<int, Set<int>>> _historySliceFor(String branch) =>
       _dailyHistoryByBranch[branch] ?? <String, Map<int, Set<int>>>{};
+
+  /// 현재 화면의 `_rows` 근무일·이름을 `_dailyHistoryByBranch`에 반영(주민번호 13자리 행만).
+  void _mergeCurrentRowsIntoDailyHistoryCache() {
+    final String branch = _workBranchName.trim();
+    if (branch.isEmpty) {
+      return;
+    }
+    final int daysInMonth = _daysInMonth(_attributionMonth);
+    final int key = _attributionMonth.year * 100 + _attributionMonth.month;
+    final Map<String, Map<int, Set<int>>> slice =
+        _dailyHistoryByBranch.putIfAbsent(
+      branch,
+      () => <String, Map<int, Set<int>>>{},
+    );
+    for (final Worker row in _rows) {
+      final String rrnRaw = row.rrn.replaceAll(RegExp(r'\D'), '');
+      if (rrnRaw.length != 13) {
+        continue;
+      }
+      final String rrn = formatRrn(rrnRaw);
+      final String name = row.name.trim();
+      if (name.isNotEmpty) {
+        final Map<String, String> nm =
+            _workerNameByBranch.putIfAbsent(branch, () => <String, String>{});
+        nm[rrn] = name;
+      }
+      final Map<int, Set<int>> byMonth =
+          slice.putIfAbsent(rrn, () => <int, Set<int>>{});
+      byMonth[key] = _workedDaysFromRow(row, daysInMonth);
+    }
+  }
+
+  void _scheduleFirestoreHistoryPrefsSave() {
+    _firestoreHistoryPrefsDebounce?.cancel();
+    _firestoreHistoryPrefsDebounce =
+        Timer(_kFirestoreHistoryPrefsDebounce, () {
+      _firestoreHistoryPrefsDebounce = null;
+      if (mounted) {
+        unawaited(_saveDailyHistoryCacheToPrefs());
+      }
+    });
+  }
+
+  void _scheduleFormHistoryMergeAndPrefsSave() {
+    _formHistoryPrefsDebounce?.cancel();
+    _formHistoryPrefsDebounce = Timer(_kFormHistoryPrefsDebounce, () {
+      _formHistoryPrefsDebounce = null;
+      if (!mounted) {
+        return;
+      }
+      _mergeCurrentRowsIntoDailyHistoryCache();
+      unawaited(_saveDailyHistoryCacheToPrefs());
+    });
+  }
+
+  /// 폼 편집 반영 + SharedPreferences 즉시 저장(디바운스 취소).
+  void _flushFormHistoryMergeAndPrefsNow() {
+    _firestoreHistoryPrefsDebounce?.cancel();
+    _firestoreHistoryPrefsDebounce = null;
+    _formHistoryPrefsDebounce?.cancel();
+    _formHistoryPrefsDebounce = null;
+    _mergeCurrentRowsIntoDailyHistoryCache();
+    unawaited(_saveDailyHistoryCacheToPrefs());
+  }
+
+  /// 현재 메모리 캐시만 디스크에 저장(디바운스 취소). 원격 스냅샷 직후 등에 사용.
+  Future<void> _flushHistoryPrefsSaveOnlyNow() async {
+    _firestoreHistoryPrefsDebounce?.cancel();
+    _firestoreHistoryPrefsDebounce = null;
+    _formHistoryPrefsDebounce?.cancel();
+    _formHistoryPrefsDebounce = null;
+    await _saveDailyHistoryCacheToPrefs();
+  }
+
+  /// 텍스트·체크 등 소규모 편집: 메모리만 갱신하고 로컬 캐시 저장은 디바운스 후 비동기 처리.
+  void _onWorkerFieldEdited() {
+    if (!mounted) {
+      return;
+    }
+    _scheduleFormHistoryMergeAndPrefsSave();
+  }
+
+  /// 일괄 적용 등 여러 카드가 한 번에 바뀌는 경우: UI 반영 후 즉시 캐시 동기화.
+  void _onBulkApplyFinished() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
+    _flushFormHistoryMergeAndPrefsNow();
+  }
 
   void _scheduleBranchContextSync(
     Map<String, dynamic> merged,
@@ -199,6 +364,11 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
     return List<int>.generate(5, (int i) => currentYear - i);
   }
 
+  void _syncBulkPayMonthFromAttribution() {
+    _bulkPayMonth.text =
+        '${_attributionMonth.year}${_attributionMonth.month.toString().padLeft(2, '0')}';
+  }
+
   void _onAttributionChanged(int year, int month) {
     final DateTime now = DateTime.now();
     final DateTime selected = DateTime(year, month, 1);
@@ -219,10 +389,14 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
       ).then((_) {
         setState(() {
           _attributionMonth = DateTime(now.year, now.month, 1);
+          _syncBulkPayMonthFromAttribution();
         });
       });
     } else {
-      setState(() => _attributionMonth = DateTime(year, month, 1));
+      setState(() {
+        _attributionMonth = DateTime(year, month, 1);
+        _syncBulkPayMonthFromAttribution();
+      });
     }
   }
 
@@ -236,7 +410,7 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
       return;
     }
     for (int i = 0; i < _rows.length; i++) {
-      final _DailyWorkerRow row = _rows[i];
+      final Worker row = _rows[i];
       final String? err = validateRrn(row.rrn);
       if (err != null) {
         final String label =
@@ -245,8 +419,50 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
         return;
       }
     }
-    await _persistToFirestore();
-    await _exportExcel();
+    if (!mounted) {
+      return;
+    }
+    BuildContext? progressDialogContext;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext ctx) {
+        progressDialogContext = ctx;
+        return AlertDialog(
+          content: Row(
+            children: <Widget>[
+              const SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  'Firestore 저장 및 엑셀 생성 중…',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey.shade800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    // 다이얼로그 라우트가 스택에 올라간 뒤에 저장·보내기를 시작해야,
+    // 작업이 매우 빨리 끝나도 `finally`에서 안전하게 닫을 수 있습니다.
+    await WidgetsBinding.instance.endOfFrame;
+    try {
+      await _persistToFirestore();
+      await _exportExcel();
+    } finally {
+      final BuildContext? dlg = progressDialogContext;
+      if (dlg != null && dlg.mounted) {
+        Navigator.of(dlg).pop();
+      }
+    }
   }
 
   Future<void> _persistToFirestore() async {
@@ -259,7 +475,7 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
     final int daysInMonth = _daysInMonth(_attributionMonth);
 
     final List<Map<String, dynamic>> payload =
-        _rows.map((_DailyWorkerRow row) => row.toJson(daysInMonth)).toList();
+        _rows.map((Worker row) => row.toJson(daysInMonth)).toList();
     await col.add(<String, dynamic>{
       'createdAt': FieldValue.serverTimestamp(),
       'attributionYear': _attributionMonth.year,
@@ -268,27 +484,7 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
       'rows': payload,
     });
     // 저장 직후 로컬 캐시를 먼저 갱신해, 다음 판정은 즉시 캐시 기반으로 처리
-    final int key = _attributionMonth.year * 100 + _attributionMonth.month;
-    final Map<String, Map<int, Set<int>>> slice =
-        _dailyHistoryByBranch.putIfAbsent(
-      branch,
-      () => <String, Map<int, Set<int>>>{},
-    );
-    for (final _DailyWorkerRow row in _rows) {
-      final String rrnRaw = row.rrn.replaceAll(RegExp(r'\D'), '');
-      if (rrnRaw.length != 13) continue;
-      final String rrn = formatRrn(rrnRaw);
-      final String name = row.name.trim();
-      if (name.isNotEmpty) {
-        final Map<String, String> nm =
-            _workerNameByBranch.putIfAbsent(branch, () => <String, String>{});
-        nm[rrn] = name;
-      }
-      final Map<int, Set<int>> byMonth =
-          slice.putIfAbsent(rrn, () => <int, Set<int>>{});
-      byMonth[key] = _workedDaysFromRow(row, daysInMonth);
-    }
-    unawaited(_saveDailyHistoryCacheToPrefs());
+    _flushFormHistoryMergeAndPrefsNow();
   }
 
   int _monthKey(DateTime d) => d.year * 100 + d.month;
@@ -300,14 +496,13 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
 
   int _daysInMonth(DateTime month) => DateTime(month.year, month.month + 1, 0).day;
 
-  Future<void> _warmDailyHistoryCache() async {
-    await _loadDailyHistoryCacheFromPrefs();
+  Future<void> _attachDailyWorkersRemoteListener() async {
     await _dailyWorkersSub?.cancel();
     _dailyWorkersSub = FirestorePaths.dailyWorkersCol().snapshots().listen((
       QuerySnapshot<Map<String, dynamic>> snap,
     ) {
       _rebuildDailyHistoryCacheFromSnapshot(snap.docs);
-      unawaited(_saveDailyHistoryCacheToPrefs());
+      _scheduleFirestoreHistoryPrefsSave();
       if (mounted && !_dailyCacheReady) {
         setState(() => _dailyCacheReady = true);
       } else {
@@ -505,7 +700,7 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
     return out;
   }
 
-  Set<int> _workedDaysFromRow(_DailyWorkerRow row, int daysInMonth) {
+  Set<int> _workedDaysFromRow(Worker row, int daysInMonth) {
     final Set<int> out = <int>{};
     final int len = math.min(daysInMonth, 31);
     for (int i = 0; i < len; i++) {
@@ -528,7 +723,7 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
 
     final List<_WorkerInput> workers = <_WorkerInput>[];
     for (int i = 0; i < _rows.length; i++) {
-      final _DailyWorkerRow r = _rows[i];
+      final Worker r = _rows[i];
       if (r.name.trim().isEmpty && r.rrn.trim().isEmpty) continue;
       final String? err = validateRrn(r.rrn);
       if (err != null) {
@@ -674,7 +869,7 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
           _workerNameByBranch.putIfAbsent(branch, () => <String, String>{});
       nm[rrn] = input.name.trim();
     }
-    await _saveDailyHistoryCacheToPrefs();
+    await _flushHistoryPrefsSaveOnlyNow();
     if (mounted) {
       setState(() {});
     }
@@ -765,7 +960,7 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
         currentlyAcquired: cachedAcquired,
         acquiredDate: _parseDate(_cachedAcquiredDate(cachedStatus)),
         lossDate: _parseDate(_cachedLossDate(cachedStatus)),
-        branchReason: '근무이력 없음: 기존 가입이력 캐시만 사용',
+        branchReason: '근무일이 없어, 보험 가입 기록이 있으면 그에 따라 표시했습니다.',
       );
     }
 
@@ -778,7 +973,7 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
         currentlyAcquired: cachedAcquired,
         acquiredDate: _parseDate(_cachedAcquiredDate(cachedStatus)),
         lossDate: _parseDate(_cachedLossDate(cachedStatus)),
-        branchReason: '타겟월($targetKey) 이전 근무이력 키 없음: 캐시 기준',
+        branchReason: '이전 달까지 등록된 근무일이 없어, 보험 기록을 참고해 표시했습니다.',
       );
     }
 
@@ -791,23 +986,12 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
         currentlyAcquired: cachedAcquired,
         acquiredDate: _parseDate(_cachedAcquiredDate(cachedStatus)),
         lossDate: _parseDate(_cachedLossDate(cachedStatus)),
-        branchReason: '구간 내 근무일 없음(맵은 있으나 체크일 없음): 캐시 기준',
+        branchReason: '해당 기간에 체크된 근무일이 없어, 보험 기록을 참고해 표시했습니다.',
       );
     }
 
     final List<List<DateTime>> segments =
         _splitWorkSegmentsByLaborGap(sortedDates, monthDays);
-
-    final StringBuffer fullTrace = StringBuffer();
-    final String rrnDigits = rrn.replaceAll(RegExp(r'\D'), '');
-    fullTrace.writeln(
-      '[식별] ${rrnDigits.length >= 6 ? '${rrnDigits.substring(0, 6)}******' : '(주민번호 형식 확인)'}',
-    );
-    if (segments.length > 1) {
-      fullTrace.writeln(
-        '[근로단절] 매월 1일~말일 전무 미근로 후 재개된 구간이 ${segments.length}개로 분리되었습니다.',
-      );
-    }
 
     _NhiSegmentSim? lastSim;
     bool anyInconclusive = false;
@@ -816,14 +1000,8 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
       final List<DateTime> seg = segments[si];
       final DateTime firstW = seg.first;
       if (firstW.isAfter(targetMonthEnd)) {
-        fullTrace.writeln(
-          '=== 세그먼트 ${si + 1}: 최초 ${_eligibilityFmtDate(firstW)} (타겟월말 이후 시작, 스킵) ===',
-        );
         continue;
       }
-      fullTrace.writeln(
-        '=== 세그먼트 ${si + 1}/${segments.length} (최초근로 ${_eligibilityFmtDate(firstW)}) ===',
-      );
       final Map<int, Set<int>> clipped =
           _clipMonthDaysToSegmentBounds(monthDays, seg.first, seg.last);
       final _NhiSegmentSim sim = _simulateNhiDailyWorkerSegment(
@@ -833,9 +1011,6 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
         targetMonthKey: targetKey,
       );
       anyInconclusive |= sim.inconclusive;
-      for (final String line in sim.trace) {
-        fullTrace.writeln(line);
-      }
       lastSim = sim;
     }
 
@@ -845,7 +1020,8 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
         currentlyAcquired: cachedAcquired,
         acquiredDate: _parseDate(_cachedAcquiredDate(cachedStatus)),
         lossDate: _parseDate(_cachedLossDate(cachedStatus)),
-        branchReason: fullTrace.toString().trim(),
+        branchReason:
+            '이번 귀속월을 기준으로 근로일만으로 판정할 수 있는 구간이 없어, 보험 기록을 참고해 표시했습니다.',
       );
     }
 
@@ -856,17 +1032,17 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
     if (anyInconclusive) {
       computedAcquired =
           computedAcquired || _isCachedAcquired(cachedStatus, targetMonthEnd);
-      fullTrace.writeln(
-        '[보완] 일부 구간이 타겟월말 기준으로 미확정(취득·상실 판정에 필요한 익월/다다음달 등 부족) → '
-        '취득여부는 시뮬레이션 결과와 기존 명부 캐시를 OR로 보완했습니다.',
-      );
     }
+
+    final String branchReason = anyInconclusive
+        ? '일부 기간만으로는 판정이 불완전할 수 있어, 취득 여부에 기존 보험 기록을 함께 반영했습니다.'
+        : '입력한 근로일을 반영해 산출한 결과입니다.';
 
     return _EligibilityCalc(
       currentlyAcquired: computedAcquired,
       acquiredDate: acquireDate ?? _parseDate(_cachedAcquiredDate(cachedStatus)),
       lossDate: lossDate ?? _parseDate(_cachedLossDate(cachedStatus)),
-      branchReason: fullTrace.toString().trim(),
+      branchReason: branchReason,
     );
   }
 
@@ -1051,12 +1227,34 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
     );
 
     if (c1 >= 8) {
-      acquire = firstWork;
-      trace.add(
-        '[사례1 충족] 1개월 되는 날까지 8일 이상 → 취득일=${_eligibilityFmtDate(acquire)}(최초근로일)',
-      );
+      bool applyCase1 = true;
+      if (firstWork.day == 1) {
+        final Set<int> m0Days = monthDays[m0Key] ?? <int>{};
+        final int lastCalDay =
+            _daysInMonth(DateTime(firstWork.year, firstWork.month, 1));
+        final bool workedOnLastDay = m0Days.contains(lastCalDay);
+        final int m1FollowKey = _nextMonthKey(m0Key);
+        final bool hasWorkInNextMonth =
+            _workDaysInCalendarMonth(monthDays, m1FollowKey) > 0;
+        if (!workedOnLastDay && !hasWorkInNextMonth) {
+          applyCase1 = false;
+          trace.add(
+            '[사례1 예외] 월초(1일) 기준 8일 이상이나, '
+            '당월 말일 및 익월 근무가 없어 1개월 미만 고용으로 사례1 취득 불가 → 사례2 검토',
+          );
+        }
+      }
+      if (applyCase1) {
+        acquire = firstWork;
+        trace.add(
+          '[사례1 충족] 1개월 되는 날까지 8일 이상 → 취득일=${_eligibilityFmtDate(acquire)}(최초근로일)',
+        );
+      }
     } else {
       trace.add('[사례1 미충족] 위 구간이 8일 미만.');
+    }
+
+    if (acquire == null) {
       final DateTime followStart = DateTime(firstWork.year, firstWork.month + 1, 1);
       final DateTime followEnd =
           DateTime(followStart.year, followStart.month + 1, 0);
@@ -1405,86 +1603,20 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
   Future<void> _exportExcel() async {
     final int daysInMonth = _daysInMonth(_attributionMonth);
     try {
-      final ByteData bd = await rootBundle.load(_kDailyWorkerElectroTemplateAsset);
-      final Uint8List templateBytes = bd.buffer.asUint8List();
-      final Excel excel = Excel.decodeBytes(templateBytes);
-      if (!excel.tables.containsKey('서식')) {
-        if (mounted) {
-          await showMessageAlert(
-            context,
-            title: '엑셀',
-            message: '템플릿에 「서식」시트가 없습니다. assets의 양식 파일을 확인해 주세요.',
-          );
+      final String globalPayMonth = () {
+        final String t = _bulkPayMonth.text.trim();
+        if (t.length == 6 && RegExp(r'^\d{6}$').hasMatch(t)) {
+          return t;
         }
-        return;
-      }
-
-      /// `excel` 인코더가 외부참조·다중 시트 조합에서 실패하는 경우가 있어,
-      /// 전자신고에 필요한 「서식」만 남기고 나머지 시트는 제거합니다.
-      try {
-        final List<String> otherSheets = excel.tables.keys
-            .where((String n) => n != '서식')
-            .toList();
-        for (final String name in otherSheets) {
-          if (excel.tables.length <= 1) {
-            break;
-          }
-          excel.delete(name);
-        }
-      } catch (e, st) {
-        debugPrint('_exportExcel: 시트 정리 건너뜀: $e\n$st');
-      }
-
-      final Sheet sheet = excel['서식'];
-
-      /// 신양식: 데이터는 2행부터, 근무일은 K~AO(31일). 양식 검증은 숫자 `1` 기재 — 문자열 `1`로 기재해 인코딩 안정화.
-      const int startRow = 2;
-      const int dayStartCol = 11;
-
-      final String yyyymm =
-          '${_attributionMonth.year}${_attributionMonth.month.toString().padLeft(2, '0')}';
-      for (int i = 0; i < _rows.length; i++) {
-        final _DailyWorkerRow row = _rows[i];
-        final int rowNum = startRow + i;
-        sheet.cell(CellIndex.indexByString('A$rowNum')).value =
-            TextCellValue('3');
-        sheet.cell(CellIndex.indexByString('B$rowNum')).value =
-            TextCellValue(row.name.trim());
-        final String rrnDigits = row.rrn.replaceAll(RegExp(r'\D'), '');
-        final String rrn13 = rrnDigits.length >= 13
-            ? rrnDigits.substring(0, 13)
-            : rrnDigits;
-        sheet.cell(CellIndex.indexByString('C$rowNum')).value =
-            TextCellValue(rrn13);
-        sheet.cell(CellIndex.indexByString('D$rowNum')).value =
-            TextCellValue(yyyymm);
-        for (int day = 1; day <= daysInMonth; day++) {
-          if (!row.days[day - 1]) {
-            continue;
-          }
-          final String col =
-              _excelColumnLettersFromIndex1Based(dayStartCol + day - 1);
-          sheet.cell(CellIndex.indexByString('$col$rowNum')).value =
-              TextCellValue('1');
-        }
-      }
-
-      final List<int>? encoded = excel.encode();
-      if (encoded == null || encoded.isEmpty) {
-        if (mounted) {
-          await showMessageAlert(
-            context,
-            title: '엑셀',
-            message: '엑셀 파일을 생성하지 못했습니다.(인코딩 실패)',
-          );
-        }
-        return;
-      }
-      final Uint8List outBytes = Uint8List.fromList(encoded);
-      final String branchPart = _workBranchName.trim().isEmpty
-          ? '미지정'
-          : _workBranchName.trim().replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-      final String fileName = '근로내용확인신고_${yyyymm}_$branchPart.xlsx';
+        return '${_attributionMonth.year}'
+            '${_attributionMonth.month.toString().padLeft(2, '0')}';
+      }();
+      final Uint8List outBytes = ExcelExportService.exportToXlsx(
+        workers: _rows,
+        daysInMonth: daysInMonth,
+        defaultPayMonth: globalPayMonth,
+      );
+      const String fileName = '근로내용확인신고서_생성.xlsx';
 
       if (kIsWeb) {
         downloadBytesInBrowser(
@@ -1511,7 +1643,7 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
         await showMessageAlert(
           context,
           title: '엑셀',
-          message: '엑셀을 불러오거나 저장하는 중 오류가 났습니다: $e',
+          message: '엑셀을 만들거나 저장하는 중 오류가 났습니다: $e',
         );
       }
     }
@@ -1519,6 +1651,7 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final User? user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       return const EnterpriseScaffold(
@@ -1552,6 +1685,7 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
                         !branchSnap.hasData;
                 _scheduleBranchContextSync(merged, branches);
                 return _buildDailyWorkerMain(
+                  merged: merged,
                   branches: branches,
                   streamsWaiting: waitingProfile || waitingBranches,
                 );
@@ -1564,6 +1698,7 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
   }
 
   Widget _buildDailyWorkerMain({
+    required Map<String, dynamic> merged,
     required List<BranchModel> branches,
     required bool streamsWaiting,
   }) {
@@ -1574,281 +1709,176 @@ class _DailyWorkerPageState extends State<DailyWorkerPage> {
         .where((String n) => n.isNotEmpty)
         .toList();
 
+    final int roleIdx =
+        (merged['roleIdx'] as num?)?.toInt() ?? RoleConstants.unspecified;
+    final String profileEmail = (merged['email'] as String? ?? '').trim();
+    final String authEmail =
+        (FirebaseAuth.instance.currentUser?.email ?? '').trim();
+    final bool showDummyDataButton = SuperAdmin.effectiveMainAdmin(
+      profileMainAdmin: merged['mainAdmin'],
+      profileEmail: profileEmail,
+      authEmail: authEmail,
+      roleIdx: roleIdx,
+    );
+
     return EnterpriseScaffold(
       title: '4대보험 · 일용직 관리',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: <Widget>[
-                const Text(
-                  '귀속연',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                DropdownButton<int>(
-                  value: yearOptions.contains(_attributionMonth.year)
-                      ? _attributionMonth.year
-                      : yearOptions.first,
-                  items: yearOptions
-                      .map((int y) => DropdownMenuItem<int>(
-                            value: y,
-                            child: Text(
-                              '$y년',
-                              style: const TextStyle(fontSize: 14),
-                            ),
-                          ))
-                      .toList(),
-                  onChanged: (int? v) {
-                    if (v != null) {
-                      _onAttributionChanged(v, _attributionMonth.month);
-                    }
-                  },
-                ),
-                const SizedBox(width: 16),
-                const Text(
-                  '귀속월',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                DropdownButton<int>(
-                  value: _attributionMonth.month,
-                  items: List<int>.generate(12, (int i) => i + 1)
-                      .map((int m) => DropdownMenuItem<int>(
-                            value: m,
-                            child: Text(
-                              '$m월',
-                              style: const TextStyle(fontSize: 14),
-                            ),
-                          ))
-                      .toList(),
-                  onChanged: (int? v) {
-                    if (v != null) {
-                      _onAttributionChanged(_attributionMonth.year, v);
-                    }
-                  },
-                ),
-                const SizedBox(width: 16),
-                const Text(
-                  '소속 사업소',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(minWidth: 140, maxWidth: 320),
-                  child: _buildBranchSelectorRow(branchNames, streamsWaiting),
-                ),
-                const SizedBox(width: 24),
-                if (!_dailyCacheReady || streamsWaiting)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 8),
-                    child: Text(
-                      '근무이력 캐시 동기화 중...',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: <Widget>[
-              const Text(
-                '일용직 근로자 관리',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-              ),
-              Row(
-                children: <Widget>[
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      setState(() {
-                        _rows.add(_DailyWorkerRow());
-                      });
-                    },
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('행 추가'),
-                  ),
-                  const SizedBox(width: 10),
-                  ElevatedButton.icon(
-                    onPressed: _save,
-                    icon: const Icon(Icons.save_outlined, size: 18),
-                    label: const Text('저장 & 엑셀 생성'),
-                  ),
-                  const SizedBox(width: 10),
-                  OutlinedButton.icon(
-                    onPressed: _checkingDates ? null : _checkAcquireLossDates,
-                    icon: _checkingDates
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.rule_folder_outlined, size: 18),
-                    label: const Text('취득/상실일 확인'),
-                  ),
-                  const SizedBox(width: 10),
-                  OutlinedButton.icon(
-                    onPressed: _openMonthlyWorkCheckDialog,
-                    icon: const Icon(Icons.calendar_view_month, size: 18),
-                    label: const Text('근무일 확인'),
-                  ),
-                  const SizedBox(width: 10),
-                  OutlinedButton.icon(
-                    onPressed: _openDummyDailyDataDialog,
-                    icon: const Icon(Icons.science_outlined, size: 18),
-                    label: const Text('더미 데이터'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Expanded(
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Scrollbar(
-                  thumbVisibility: true,
-                  controller: _horizontalScroll,
-                  child: SingleChildScrollView(
-                    controller: _horizontalScroll,
-                    scrollDirection: Axis.horizontal,
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.vertical,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(minWidth: 1100),
-                        child: DataTable(
-                        columnSpacing: 2,
-                        horizontalMargin: 8,
-                        headingRowHeight: 36,
-                        dataRowMinHeight: 40,
-                        dataRowMaxHeight: 44,
-                        columns: <DataColumn>[
-                          const DataColumn(
-                            label: SizedBox(
-                              width: 100,
-                              child: Text('성명'),
-                            ),
-                          ),
-                          const DataColumn(
-                            label: SizedBox(
-                              width: 130,
-                              child: Text('주민번호'),
-                            ),
-                          ),
-                          for (int day = 1; day <= daysInMonth; day++)
-                            DataColumn(
-                              label: SizedBox(
-                                width: 24,
-                                child: Center(child: Text('$day')),
-                              ),
-                            ),
-                          const DataColumn(
-                            label: SizedBox(width: 48, child: Text('')),
-                          ),
-                        ],
-                        rows: List<DataRow>.generate(_rows.length, (int index) {
-                          final _DailyWorkerRow row = _rows[index];
-                          return DataRow(
-                            cells: <DataCell>[
-                              DataCell(
-                                SizedBox(
-                                  width: 100,
-                                  child: TextField(
-                                    decoration: const InputDecoration(
-                                      isDense: true,
-                                      border: InputBorder.none,
-                                      contentPadding: EdgeInsets.symmetric(
-                                        horizontal: 4,
-                                        vertical: 8,
-                                      ),
-                                    ),
-                                    controller: row.nameController,
-                                  ),
-                                ),
-                              ),
-                              DataCell(
-                                SizedBox(
-                                  width: 130,
-                                  child: TextField(
-                                    decoration: const InputDecoration(
-                                      isDense: true,
-                                      border: InputBorder.none,
-                                      hintText: '900101-1234567',
-                                      counterText: '',
-                                      contentPadding: EdgeInsets.symmetric(
-                                        horizontal: 4,
-                                        vertical: 8,
-                                      ),
-                                    ),
-                                    controller: row.rrnController,
-                                    keyboardType: TextInputType.number,
-                                    maxLength: 14,
-                                    inputFormatters: digitHyphenFormatters,
-                                    onChanged: (String v) {
-                                      if (v.length == 6 &&
-                                          !v.contains('-')) {
-                                        row.rrnController.text = '$v-';
-                                        row.rrnController.selection =
-                                            TextSelection.fromPosition(
-                                          const TextPosition(offset: 7),
-                                        );
-                                      }
-                                    },
-                                  ),
-                                ),
-                              ),
-                              for (int day = 0; day < daysInMonth; day++)
-                                DataCell(
-                                  _DayCheckbox(
-                                    value: row.days[day],
-                                    onChanged: (bool? value) {
-                                      setState(() {
-                                        row.days[day] = value ?? false;
-                                      });
-                                    },
-                                  ),
-                                ),
-                              DataCell(
-                                IconButton(
-                                  tooltip: '행 삭제',
-                                  icon: const Icon(
-                                    Icons.delete_outline,
-                                    size: 18,
-                                  ),
-                                  onPressed: () {
-                                    setState(() {
-                                      _rows.removeAt(index);
-                                    });
-                                  },
-                                ),
-                              ),
-                            ],
-                          );
-                        }),
+      useFullWidth: true,
+      child: CustomScrollView(
+        slivers: <Widget>[
+              SliverToBoxAdapter(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: <Widget>[
+                      const Text(
+                        '귀속연',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
+                      const SizedBox(width: 8),
+                      DropdownButton<int>(
+                        value: yearOptions.contains(_attributionMonth.year)
+                            ? _attributionMonth.year
+                            : yearOptions.first,
+                        items: yearOptions
+                            .map((int y) => DropdownMenuItem<int>(
+                                  value: y,
+                                  child: Text(
+                                    '$y년',
+                                    style: const TextStyle(fontSize: 14),
+                                  ),
+                                ))
+                            .toList(),
+                        onChanged: (int? v) {
+                          if (v != null) {
+                            _onAttributionChanged(v, _attributionMonth.month);
+                          }
+                        },
+                      ),
+                      const SizedBox(width: 16),
+                      const Text(
+                        '귀속월',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      DropdownButton<int>(
+                        value: _attributionMonth.month,
+                        items: List<int>.generate(12, (int i) => i + 1)
+                            .map((int m) => DropdownMenuItem<int>(
+                                  value: m,
+                                  child: Text(
+                                    '$m월',
+                                    style: const TextStyle(fontSize: 14),
+                                  ),
+                                ))
+                            .toList(),
+                        onChanged: (int? v) {
+                          if (v != null) {
+                            _onAttributionChanged(_attributionMonth.year, v);
+                          }
+                        },
+                      ),
+                      const SizedBox(width: 16),
+                      const Text(
+                        '소속 사업소',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          minWidth: 140,
+                          maxWidth: 320,
+                        ),
+                        child: _buildBranchSelectorRow(
+                          branchNames,
+                          streamsWaiting,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 12)),
+              SliverPersistentHeader(
+                pinned: true,
+                delegate: _DailyWorkerStickyToolbarDelegate(
+                  showDummyDataButton: showDummyDataButton,
+                  onSave: _save,
+                  onCheckDates: _checkAcquireLossDates,
+                  checkingDates: _checkingDates,
+                  onMonthlyWorkCheck: _openMonthlyWorkCheckDialog,
+                  onDummyData: _openDummyDailyDataDialog,
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: _BulkApplyPanel(
+                  key: _bulkApplyPanelKey,
+                  workers: _rows,
+                  payMonthController: _bulkPayMonth,
+                  onBulkApplied: _onBulkApplyFinished,
+                ),
+              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 10)),
+              SliverPadding(
+                padding: const EdgeInsets.only(top: 8),
+                sliver: SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (BuildContext context, int index) {
+                      return Padding(
+                        padding: EdgeInsets.only(top: index == 0 ? 0 : 10),
+                        child: WorkerCardWidget(
+                          key: ValueKey<int>(index),
+                          rowIndex: index + 1,
+                          worker: _rows[index],
+                          daysInMonth: daysInMonth,
+                          onDelete: () {
+                            setState(() {
+                              final Worker w = _rows.removeAt(index);
+                              w.dispose();
+                            });
+                            _flushFormHistoryMergeAndPrefsNow();
+                          },
+                          onChanged: _onWorkerFieldEdited,
+                          onTapOutsideCard: _onWorkerFieldEdited,
+                        ),
+                      );
+                    },
+                    childCount: _rows.length,
+                    addAutomaticKeepAlives: true,
+                  ),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 10, bottom: 24),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _rows.add(
+                            _bulkApplyPanelKey.currentState
+                                    ?.createWorkerWithCurrentBulkDefaults() ??
+                                Worker(),
+                          );
+                        });
+                        _flushFormHistoryMergeAndPrefsNow();
+                      },
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('근로자 추가'),
                     ),
                   ),
                 ),
               ),
-            ),
-          ),
         ],
       ),
     );
@@ -2160,49 +2190,1362 @@ class _NhiSegmentSim {
   final bool inconclusive;
 }
 
-class _DayCheckbox extends StatefulWidget {
-  const _DayCheckbox({
-    required this.value,
-    required this.onChanged,
+/// 저장·확인 등 액션 버튼만 스크롤 시 상단에 고정(세로 스크롤은 페이지 전체).
+class _DailyWorkerStickyToolbarDelegate extends SliverPersistentHeaderDelegate {
+  _DailyWorkerStickyToolbarDelegate({
+    required this.showDummyDataButton,
+    required this.onSave,
+    required this.onCheckDates,
+    required this.checkingDates,
+    required this.onMonthlyWorkCheck,
+    required this.onDummyData,
   });
 
-  final bool value;
-  final ValueChanged<bool?> onChanged;
+  static const double kExtent = 60;
+
+  final bool showDummyDataButton;
+  final Future<void> Function() onSave;
+  final Future<void> Function() onCheckDates;
+  final bool checkingDates;
+  final VoidCallback onMonthlyWorkCheck;
+  final VoidCallback onDummyData;
 
   @override
-  State<_DayCheckbox> createState() => _DayCheckboxState();
+  double get minExtent => kExtent;
+
+  @override
+  double get maxExtent => kExtent;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return Material(
+      color: const Color(0xFFF8FAFC),
+      elevation: overlapsContent ? 2 : 0,
+      shadowColor: Colors.black26,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC),
+          border: Border(
+            bottom: BorderSide(color: Colors.grey.shade300),
+          ),
+        ),
+        child: SizedBox(
+          height: kExtent,
+          width: double.infinity,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Row(
+              children: <Widget>[
+                const Text(
+                  '일용직 근로자 관리',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: <Widget>[
+                        ElevatedButton.icon(
+                          onPressed: onSave,
+                          icon: const Icon(Icons.save_outlined, size: 18),
+                          label: const Text('저장 & 엑셀 생성'),
+                        ),
+                        const SizedBox(width: 10),
+                        OutlinedButton.icon(
+                          onPressed: checkingDates ? null : onCheckDates,
+                          icon: checkingDates
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.rule_folder_outlined,
+                                  size: 18,
+                                ),
+                          label: const Text('취득/상실일 확인'),
+                        ),
+                        const SizedBox(width: 10),
+                        OutlinedButton.icon(
+                          onPressed: onMonthlyWorkCheck,
+                          icon: const Icon(
+                            Icons.calendar_view_month,
+                            size: 18,
+                          ),
+                          label: const Text('근무일 확인'),
+                        ),
+                        if (showDummyDataButton) ...<Widget>[
+                          const SizedBox(width: 10),
+                          OutlinedButton.icon(
+                            onPressed: onDummyData,
+                            icon: const Icon(Icons.science_outlined, size: 18),
+                            label: const Text('더미 데이터'),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _DailyWorkerStickyToolbarDelegate old) {
+    return old.showDummyDataButton != showDummyDataButton ||
+        old.checkingDates != checkingDates;
+  }
 }
 
-class _DayCheckboxState extends State<_DayCheckbox> {
-  late FocusNode _focusNode;
+class _BulkApplyPanel extends StatefulWidget {
+  const _BulkApplyPanel({
+    super.key,
+    required this.workers,
+    required this.payMonthController,
+    required this.onBulkApplied,
+  });
+
+  final List<Worker> workers;
+  final TextEditingController payMonthController;
+  final VoidCallback onBulkApplied;
+
+  @override
+  State<_BulkApplyPanel> createState() => _BulkApplyPanelState();
+}
+
+class _BulkApplyPanelState extends State<_BulkApplyPanel> {
+  late final TextEditingController _nationalityCode;
+  late final TextEditingController _stayStatusCode;
+  late final TextEditingController _jobCode;
+  late final TextEditingController _separationReasonCode;
+  late final TextEditingController _premiumSign;
+  late final TextEditingController _premiumReason;
+  bool _ntsDailyReportBulk = false;
+  bool _bulkIndustrial = false;
+  bool _bulkEmployment = false;
+  /// 추가 코드·사유 필드 접기/펼치기 (기본 접힘).
+  bool _isBatchPanelExpanded = false;
+
+  /// 신규 근로자 행에 주입할 때 사용(상단 일괄 패널 현재 값).
+  void applyCurrentBulkPanelValuesToWorker(Worker w) {
+    w.industrialAccident = _bulkIndustrial;
+    w.employment = _bulkEmployment;
+    w.nationalityCodeController.text = _nationalityCode.text.trim();
+    w.stayStatusCodeController.text = _stayStatusCode.text.trim();
+    w.jobCodeController.text = _jobCode.text.trim();
+    w.separationReasonCodeController.text = _separationReasonCode.text.trim();
+    w.premiumSignController.text = _premiumSign.text.trim();
+    w.premiumReasonController.text = _premiumReason.text.trim();
+    w.ntsDailyReport = _ntsDailyReportBulk;
+  }
+
+  Worker createWorkerWithCurrentBulkDefaults() {
+    final Worker w = Worker();
+    applyCurrentBulkPanelValuesToWorker(w);
+    return w;
+  }
 
   @override
   void initState() {
     super.initState();
-    _focusNode = FocusNode();
+    _nationalityCode = TextEditingController();
+    _stayStatusCode = TextEditingController();
+    _jobCode = TextEditingController();
+    _separationReasonCode = TextEditingController();
+    _premiumSign = TextEditingController();
+    _premiumReason = TextEditingController();
   }
 
   @override
   void dispose() {
-    _focusNode.dispose();
+    _nationalityCode.dispose();
+    _stayStatusCode.dispose();
+    _jobCode.dispose();
+    _separationReasonCode.dispose();
+    _premiumSign.dispose();
+    _premiumReason.dispose();
     super.dispose();
+  }
+
+  void _applyToAllWorkers() {
+    for (final Worker w in widget.workers) {
+      applyCurrentBulkPanelValuesToWorker(w);
+    }
+    widget.onBulkApplied();
   }
 
   @override
   Widget build(BuildContext context) {
+    const Duration kPanelAnim = Duration(milliseconds: 260);
+
+    Widget payMonthField() => SizedBox(
+          width: 168,
+          child: CustomLabeledField(
+            label: '지급월(YYYYMM)',
+            tooltip:
+                '급여를 지급한 연·월을 여섯 자리 숫자로 입력합니다. 예: 202601',
+            field: TextFormField(
+              controller: widget.payMonthController,
+              decoration: _dwOutlineDecoration(enabled: true),
+              keyboardType: TextInputType.number,
+              inputFormatters: <TextInputFormatter>[
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(6),
+              ],
+            ),
+          ),
+        );
+
+    Widget insuranceField() => SizedBox(
+          width: 200,
+          child: CustomLabeledField(
+            label: '보험구분',
+            tooltip:
+                '산재·고용보험 적용 여부를 모든 근로자에 동일하게 덮어씁니다.',
+            field: SizedBox(
+              height: 40,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Checkbox(
+                      value: _bulkIndustrial,
+                      materialTapTargetSize:
+                          MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                      onChanged: (bool? v) {
+                        setState(() => _bulkIndustrial = v ?? false);
+                      },
+                    ),
+                    Text(
+                      '산재',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey.shade800,
+                      ),
+                    ),
+                    Checkbox(
+                      value: _bulkEmployment,
+                      materialTapTargetSize:
+                          MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                      onChanged: (bool? v) {
+                        setState(() => _bulkEmployment = v ?? false);
+                      },
+                    ),
+                    Text(
+                      '고용',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey.shade800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+
+    Widget ntsField() => SizedBox(
+          width: 240,
+          child: CustomLabeledField(
+            label: '국세청 일용근로소득 신고',
+            tooltip: '일용근로소득을 국세청에 신고할지 여부를 일괄 반영합니다.',
+            field: Row(
+              children: <Widget>[
+                Checkbox(
+                  value: _ntsDailyReportBulk,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  onChanged: (bool? v) {
+                    setState(() => _ntsDailyReportBulk = v ?? false);
+                  },
+                ),
+                Expanded(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '신고 여부 일괄 적용',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey.shade800,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+
+    return Material(
+      color: const Color(0xFFF8FAFC),
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const Text(
+              '전체 일괄 적용',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: Wrap(
+                    spacing: 10,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.start,
+                    children: <Widget>[
+                      payMonthField(),
+                      insuranceField(),
+                      ntsField(),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: _isBatchPanelExpanded
+                      ? '추가 항목 접기'
+                      : '국적·직종·사유 등 더보기',
+                  onPressed: () {
+                    setState(() {
+                      _isBatchPanelExpanded = !_isBatchPanelExpanded;
+                    });
+                  },
+                  icon: Icon(
+                    _isBatchPanelExpanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    size: 26,
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: ElevatedButton(
+                    onPressed: _applyToAllWorkers,
+                    child: const Text('일괄 적용'),
+                  ),
+                ),
+              ],
+            ),
+            AnimatedSize(
+              duration: kPanelAnim,
+              curve: Curves.easeInOut,
+              alignment: Alignment.topLeft,
+              child: _isBatchPanelExpanded
+                  ? Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: Wrap(
+                        spacing: 16,
+                        runSpacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.start,
+                        children: <Widget>[
+                          SizedBox(
+                            width: 132,
+                            child: CustomLabeledField(
+                              label: '국적코드',
+                              tooltip: _kTooltipNationalityStay,
+                              labelTrailing: const _CodeRefIconButton(
+                                comCdClsfId: 'A151',
+                                tooltip: '국적·체류 공통코드표 (새 창)',
+                              ),
+                              field: TextFormField(
+                                controller: _nationalityCode,
+                                decoration: _dwOutlineDecoration(enabled: true),
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 140,
+                            child: CustomLabeledField(
+                              label: '체류자격코드',
+                              tooltip: _kTooltipNationalityStay,
+                              labelTrailing: const _CodeRefIconButton(
+                                comCdClsfId: 'A151',
+                                tooltip: '국적·체류 공통코드표 (새 창)',
+                              ),
+                              field: TextFormField(
+                                controller: _stayStatusCode,
+                                decoration: _dwOutlineDecoration(enabled: true),
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 132,
+                            child: CustomLabeledField(
+                              label: '직종코드',
+                              tooltip: _kTooltipJobCode,
+                              labelTrailing: const _CodeRefIconButton(
+                                comCdClsfId: 'D108',
+                                tooltip: '직종분류 공통코드표 (새 창)',
+                              ),
+                              field: TextFormField(
+                                controller: _jobCode,
+                                decoration: _dwOutlineDecoration(enabled: true),
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 136,
+                            child: CustomLabeledField(
+                              label: '이직사유코드',
+                              tooltip: _kTooltipSeparationReason,
+                              field: TextFormField(
+                                controller: _separationReasonCode,
+                                decoration: _dwOutlineDecoration(enabled: true),
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 144,
+                            child: CustomLabeledField(
+                              label: '보험료부과구분 부호',
+                              tooltip: _kTooltipPremiumReason,
+                              labelTrailing: const _CodeRefIconButton(
+                                comCdClsfId: 'C201',
+                                tooltip: '보험료부과구분 공통코드표 (새 창)',
+                              ),
+                              field: TextFormField(
+                                controller: _premiumSign,
+                                decoration: _dwOutlineDecoration(enabled: true),
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 152,
+                            child: CustomLabeledField(
+                              label: '보험료부과구분 사유',
+                              tooltip: _kTooltipPremiumReason,
+                              labelTrailing: const _CodeRefIconButton(
+                                comCdClsfId: 'C201',
+                                tooltip: '보험료부과구분 공통코드표 (새 창)',
+                              ),
+                              field: TextFormField(
+                                controller: _premiumReason,
+                                decoration: _dwOutlineDecoration(enabled: true),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class CustomLabeledField extends StatelessWidget {
+  const CustomLabeledField({
+    super.key,
+    required this.label,
+    this.tooltip,
+    this.labelTrailing,
+    required this.field,
+  });
+
+  /// `_CodeRefIconButton`과 동일한 최소 터치 영역에 맞춤(링크 유무와 관계없이 필드 시작 세로 위치·라벨 가로 폭 통일).
+  static const double _kLabelRowHeight = 30;
+  static const double _kLabelTrailingSlotWidth = 30;
+
+  final String label;
+  final String? tooltip;
+  /// 라벨 행 우측(코드 조회 아이콘 등).
+  final Widget? labelTrailing;
+  final Widget field;
+
+  @override
+  Widget build(BuildContext context) {
+    final TextStyle labelStyle = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w800,
+      color: Colors.grey.shade800,
+    );
+    final Widget labelText = Text(
+      label,
+      style: labelStyle,
+      maxLines: 2,
+      softWrap: true,
+    );
+    final Widget labelRow = SizedBox(
+      height: _kLabelRowHeight,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: <Widget>[
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: labelText,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: _kLabelTrailingSlotWidth,
+            child: labelTrailing != null
+                ? Align(
+                    alignment: Alignment.centerRight,
+                    child: labelTrailing,
+                  )
+                : const SizedBox.shrink(),
+          ),
+        ],
+      ),
+    );
+
+    final Widget column = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        labelRow,
+        const SizedBox(height: 4),
+        field,
+      ],
+    );
+
+    final String? tip = tooltip?.trim();
+    if (tip != null && tip.isNotEmpty) {
+      return Tooltip(
+        message: tip,
+        child: column,
+      );
+    }
+    return column;
+  }
+}
+
+/// 전화번호: 테두리 1개 영역 안에 3칸(테두리 없음) + 구분.
+class _WorkerPhoneGroupedField extends StatelessWidget {
+  const _WorkerPhoneGroupedField({
+    required this.worker,
+    required this.onChanged,
+  });
+
+  final Worker worker;
+  final VoidCallback onChanged;
+
+  static const InputDecoration _innerDeco = InputDecoration(
+    isDense: true,
+    border: InputBorder.none,
+    contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomLabeledField(
+      label: '전화번호',
+      tooltip: '지역번호 - 국번 - 뒷번호',
+      field: Container(
+        height: 40,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFCBD5E1)),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Row(
+          children: <Widget>[
+            SizedBox(
+              width: 86,
+              child: TextFormField(
+                controller: worker.phoneAreaController,
+                decoration: _innerDeco,
+                keyboardType: TextInputType.number,
+                inputFormatters: <TextInputFormatter>[
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(4),
+                ],
+                onChanged: (_) => onChanged(),
+              ),
+            ),
+            Container(
+              width: 1,
+              height: 24,
+              color: const Color(0xFFE2E8F0),
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 4),
+              child: Text('-', style: TextStyle(fontWeight: FontWeight.w700)),
+            ),
+            Container(
+              width: 1,
+              height: 24,
+              color: const Color(0xFFE2E8F0),
+            ),
+            SizedBox(
+              width: 86,
+              child: TextFormField(
+                controller: worker.phoneMidController,
+                decoration: _innerDeco,
+                keyboardType: TextInputType.number,
+                inputFormatters: <TextInputFormatter>[
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(4),
+                ],
+                onChanged: (_) => onChanged(),
+              ),
+            ),
+            Container(
+              width: 1,
+              height: 24,
+              color: const Color(0xFFE2E8F0),
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 4),
+              child: Text('-', style: TextStyle(fontWeight: FontWeight.w700)),
+            ),
+            Container(
+              width: 1,
+              height: 24,
+              color: const Color(0xFFE2E8F0),
+            ),
+            Expanded(
+              child: TextFormField(
+                controller: worker.phoneLastController,
+                decoration: _innerDeco,
+                keyboardType: TextInputType.number,
+                inputFormatters: <TextInputFormatter>[
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(4),
+                ],
+                onChanged: (_) => onChanged(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class WorkerCardWidget extends StatefulWidget {
+  const WorkerCardWidget({
+    super.key,
+    required this.rowIndex,
+    required this.worker,
+    required this.daysInMonth,
+    required this.onDelete,
+    required this.onChanged,
+    required this.onTapOutsideCard,
+  });
+
+  /// 카드 목록 표시용 순번(1부터).
+  final int rowIndex;
+  final Worker worker;
+  final int daysInMonth;
+  final VoidCallback onDelete;
+  final VoidCallback onChanged;
+  final VoidCallback onTapOutsideCard;
+
+  @override
+  State<WorkerCardWidget> createState() => _WorkerCardWidgetState();
+}
+
+class _WorkerCardWidgetState extends State<WorkerCardWidget> {
+  late final ScrollController _h;
+  bool _daysExpanded = false;
+  /// 카드 본문(Line1+2) 표시 여부(기본: 펼침).
+  bool _isRowExpanded = true;
+
+  late final FocusNode _totalPayFocus;
+  late final FocusNode _wageFocus;
+  late final FocusNode _taxableFocus;
+  late final FocusNode _basePayDaysFocus;
+
+  String _wageTextAtWageFocus = '';
+  String _taxableTextAtTaxableFocus = '';
+  String _basePayTextAtBaseFocus = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _h = ScrollController();
+    _totalPayFocus = FocusNode(debugLabel: 'worker_totalPay');
+    _totalPayFocus.addListener(_onTotalPayFocusChange);
+    _wageFocus = FocusNode(debugLabel: 'worker_wageTotal');
+    _wageFocus.addListener(_onWageFocusChange);
+    _taxableFocus = FocusNode(debugLabel: 'worker_taxableTotal');
+    _taxableFocus.addListener(_onTaxableFocusChange);
+    _basePayDaysFocus = FocusNode(debugLabel: 'worker_basePayDays');
+    _basePayDaysFocus.addListener(_onBasePayDaysFocusChange);
+  }
+
+  Worker get _w => widget.worker;
+
+  void _onTotalPayFocusChange() {
+    if (!_totalPayFocus.hasFocus) {
+      _w.applyTotalPayLinkOnFocusOut();
+      widget.onChanged();
+    }
+  }
+
+  void _onWageFocusChange() {
+    if (_wageFocus.hasFocus) {
+      _wageTextAtWageFocus = _w.wageTotalController.text;
+    } else {
+      if (_w.wageTotalController.text != _wageTextAtWageFocus) {
+        _w._wageEdited = true;
+      }
+    }
+  }
+
+  void _onTaxableFocusChange() {
+    if (_taxableFocus.hasFocus) {
+      _taxableTextAtTaxableFocus = _w.taxableTotalController.text;
+    } else {
+      if (_w.taxableTotalController.text != _taxableTextAtTaxableFocus) {
+        _w._taxableEdited = true;
+      }
+    }
+  }
+
+  void _onBasePayDaysFocusChange() {
+    if (_basePayDaysFocus.hasFocus) {
+      _basePayTextAtBaseFocus = _w.basePayDaysController.text;
+    } else {
+      if (_w.basePayDaysController.text != _basePayTextAtBaseFocus) {
+        _w._basePayDaysUserEdited = true;
+      }
+    }
+  }
+
+  void _syncBasePayAfterAccordionClose() {
+    _w.applyWorkedDaysToBasePayDaysIfNeeded(widget.daysInMonth);
+    widget.onChanged();
+  }
+
+  @override
+  void dispose() {
+    _totalPayFocus.removeListener(_onTotalPayFocusChange);
+    _totalPayFocus.dispose();
+    _wageFocus.removeListener(_onWageFocusChange);
+    _wageFocus.dispose();
+    _taxableFocus.removeListener(_onTaxableFocusChange);
+    _taxableFocus.dispose();
+    _basePayDaysFocus.removeListener(_onBasePayDaysFocusChange);
+    _basePayDaysFocus.dispose();
+    _h.dispose();
+    super.dispose();
+  }
+
+  Widget _buildWorkedDaysLabeledField() {
+    final Worker w = _w;
+    final int worked = w.workedDaysCount(widget.daysInMonth);
+    return CustomLabeledField(
+      label: '근로일수',
+      field: OutlinedButton(
+        onPressed: () {
+          final bool closing = _daysExpanded;
+          setState(() {
+            _daysExpanded = !_daysExpanded;
+          });
+          if (closing) {
+            _syncBasePayAfterAccordionClose();
+          } else {
+            widget.onChanged();
+          }
+        },
+        child: Text('근로일수 $worked일'),
+      ),
+    );
+  }
+
+  Widget _buildCollapsedSummaryRow({
+    required Worker w,
+  }) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          IconButton(
+            tooltip: '전체 필드 펼치기',
+            padding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            onPressed: () => setState(() => _isRowExpanded = true),
+            icon: const Icon(Icons.keyboard_arrow_down, size: 22),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              '${widget.rowIndex}',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: Colors.grey.shade800,
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          SizedBox(
+            width: 168,
+            child: _InsuranceTypeField(
+              industrialAccident: w.industrialAccident,
+              employment: w.employment,
+              onChanged: (bool a, bool b) {
+                setState(() {
+                  w.industrialAccident = a;
+                  w.employment = b;
+                });
+                widget.onChanged();
+              },
+            ),
+          ),
+          _fixedField(
+            width: 160,
+            child: CustomLabeledField(
+              label: '성명',
+              field: TextFormField(
+                controller: w.nameController,
+                decoration: _dwOutlineDecoration(enabled: true),
+                onChanged: (_) => widget.onChanged(),
+              ),
+            ),
+          ),
+          _fixedField(
+            width: 200,
+            child: CustomLabeledField(
+              label: '주민(외국인)등록번호',
+              field: TextFormField(
+                controller: w.rrnController,
+                decoration: _dwOutlineDecoration(enabled: true).copyWith(
+                  hintText: '900101-1234567',
+                ),
+                keyboardType: TextInputType.number,
+                maxLength: 14,
+                inputFormatters: digitHyphenFormatters,
+                onChanged: (String v) {
+                  if (v.length == 6 && !v.contains('-')) {
+                    w.rrnController.text = '$v-';
+                    w.rrnController.selection =
+                        TextSelection.fromPosition(const TextPosition(offset: 7));
+                  }
+                  widget.onChanged();
+                },
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 180,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: _buildWorkedDaysLabeledField(),
+            ),
+          ),
+          IconButton(
+            tooltip: '삭제',
+            padding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+            onPressed: widget.onDelete,
+            icon: const Icon(Icons.delete_outline, size: 22),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _fixedField({
+    required double width,
+    required Widget child,
+  }) {
     return SizedBox(
-      width: 24,
-      child: Center(
-        child: Tooltip(
-          message: '탭(tab) 키를 눌러 다음 일자로 넘어갈 수 있습니다',
-          child: Listener(
-            onPointerDown: (_) => _focusNode.requestFocus(),
-            child: Checkbox(
-              value: widget.value,
-              focusNode: _focusNode,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              visualDensity: VisualDensity.compact,
-              onChanged: widget.onChanged,
+      width: width,
+      child: Padding(
+        padding: const EdgeInsets.only(right: 10),
+        child: child,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Worker w = _w;
+    final bool disableEmploymentOnlyFields = w.onlyIndustrialInsurance;
+
+    return TapRegion(
+      onTapOutside: (_) => widget.onTapOutsideCard(),
+      child: RepaintBoundary(
+        child: Material(
+          color: Colors.white,
+          elevation: 2,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 280),
+                  curve: Curves.easeInOutCubic,
+                  alignment: Alignment.topLeft,
+                  child: Scrollbar(
+                    controller: _h,
+                    thumbVisibility: true,
+                    trackVisibility: true,
+                    notificationPredicate: (ScrollNotification notification) =>
+                        notification.metrics.axis == Axis.horizontal,
+                    child: SingleChildScrollView(
+                      controller: _h,
+                      scrollDirection: Axis.horizontal,
+                      child: _isRowExpanded
+                          ? SizedBox(
+                              width: 2580,
+                              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: SizedBox(
+                      width: 72,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          SizedBox(
+                            height: CustomLabeledField._kLabelRowHeight,
+                            child: Row(
+                              children: <Widget>[
+                                IconButton(
+                                  tooltip: '요약으로 접기',
+                                  padding: EdgeInsets.zero,
+                                  visualDensity: VisualDensity.compact,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 28,
+                                    minHeight: 28,
+                                  ),
+                                  onPressed: () =>
+                                      setState(() => _isRowExpanded = false),
+                                  icon: const Icon(
+                                    Icons.keyboard_arrow_up,
+                                    size: 20,
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Center(
+                                    child: Text(
+                                      '${widget.rowIndex}',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w800,
+                                        color: Colors.grey.shade800,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          IconButton(
+                            tooltip: '삭제',
+                            padding: EdgeInsets.zero,
+                            visualDensity: VisualDensity.compact,
+                            constraints: const BoxConstraints(
+                              minWidth: 40,
+                              minHeight: 40,
+                            ),
+                            onPressed: widget.onDelete,
+                            icon: const Icon(Icons.delete_outline, size: 22),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 2500,
+                    child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      _fixedField(
+                        width: 168,
+                        child: _InsuranceTypeField(
+                          industrialAccident: w.industrialAccident,
+                          employment: w.employment,
+                          onChanged: (bool a, bool b) {
+                            setState(() {
+                              w.industrialAccident = a;
+                              w.employment = b;
+                            });
+                            widget.onChanged();
+                          },
+                        ),
+                      ),
+                      _fixedField(
+                        width: 160,
+                        child: CustomLabeledField(
+                          label: '성명',
+                          field: TextFormField(
+                            controller: w.nameController,
+                            decoration: _dwOutlineDecoration(enabled: true),
+                            onChanged: (_) => widget.onChanged(),
+                          ),
+                        ),
+                      ),
+                      _fixedField(
+                        width: 200,
+                        child: CustomLabeledField(
+                          label: '주민(외국인)등록번호',
+                          field: TextFormField(
+                            controller: w.rrnController,
+                            decoration: _dwOutlineDecoration(enabled: true).copyWith(
+                              hintText: '900101-1234567',
+                            ),
+                            keyboardType: TextInputType.number,
+                            maxLength: 14,
+                            inputFormatters: digitHyphenFormatters,
+                            onChanged: (String v) {
+                              if (v.length == 6 && !v.contains('-')) {
+                                w.rrnController.text = '$v-';
+                                w.rrnController.selection =
+                                    TextSelection.fromPosition(
+                                  const TextPosition(offset: 7),
+                                );
+                              }
+                              widget.onChanged();
+                            },
+                          ),
+                        ),
+                      ),
+                      _fixedField(
+                        width: 132,
+                        child: CustomLabeledField(
+                          label: '국적코드',
+                          tooltip: _kTooltipNationalityStay,
+                          labelTrailing: const _CodeRefIconButton(
+                            comCdClsfId: 'A151',
+                            tooltip: '국적·체류 공통코드표 (새 창)',
+                          ),
+                          field: TextFormField(
+                            controller: w.nationalityCodeController,
+                            decoration: _dwOutlineDecoration(enabled: true),
+                            onChanged: (_) => widget.onChanged(),
+                          ),
+                        ),
+                      ),
+                      _fixedField(
+                        width: 140,
+                        child: CustomLabeledField(
+                          label: '체류자격코드',
+                          tooltip: _kTooltipNationalityStay,
+                          labelTrailing: const _CodeRefIconButton(
+                            comCdClsfId: 'A151',
+                            tooltip: '국적·체류 공통코드표 (새 창)',
+                          ),
+                          field: TextFormField(
+                            controller: w.stayStatusCodeController,
+                            decoration: _dwOutlineDecoration(enabled: true),
+                            onChanged: (_) => widget.onChanged(),
+                          ),
+                        ),
+                      ),
+                      _fixedField(
+                        width: 320,
+                        child: _WorkerPhoneGroupedField(
+                          worker: w,
+                          onChanged: widget.onChanged,
+                        ),
+                      ),
+                      _fixedField(
+                        width: 152,
+                        child: CustomLabeledField(
+                          label: '직종코드',
+                          tooltip: _kTooltipJobCode,
+                          labelTrailing: const _CodeRefIconButton(
+                            comCdClsfId: 'D108',
+                            tooltip: '직종분류 공통코드표 (새 창)',
+                          ),
+                          field: TextFormField(
+                            controller: w.jobCodeController,
+                            decoration: _dwOutlineDecoration(enabled: true),
+                            onChanged: (_) => widget.onChanged(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      _fixedField(
+                        width: 180,
+                        child: _buildWorkedDaysLabeledField(),
+                      ),
+                      _fixedField(
+                        width: 150,
+                        child: CustomLabeledField(
+                          label: '일평균근로시간',
+                          field: TextFormField(
+                            controller: w.avgWorkHoursController,
+                            decoration: _dwOutlineDecoration(enabled: true),
+                            keyboardType: TextInputType.number,
+                            onChanged: (_) => widget.onChanged(),
+                          ),
+                        ),
+                      ),
+                      _fixedField(
+                        width: 170,
+                        child: CustomLabeledField(
+                          label: '보수지급기초일수',
+                          field: TextFormField(
+                            controller: w.basePayDaysController,
+                            focusNode: _basePayDaysFocus,
+                            decoration: _dwOutlineDecoration(enabled: true),
+                            keyboardType: TextInputType.number,
+                            onChanged: (_) => widget.onChanged(),
+                          ),
+                        ),
+                      ),
+                      _fixedField(
+                        width: 150,
+                        child: CustomLabeledField(
+                          label: '보수총액',
+                          field: TextFormField(
+                            controller: w.totalPayController,
+                            focusNode: _totalPayFocus,
+                            decoration: _dwOutlineDecoration(enabled: true),
+                            keyboardType: TextInputType.number,
+                            inputFormatters: <TextInputFormatter>[
+                              FilteringTextInputFormatter.digitsOnly,
+                            ],
+                            onChanged: (_) => widget.onChanged(),
+                          ),
+                        ),
+                      ),
+                      _fixedField(
+                        width: 150,
+                        child: CustomLabeledField(
+                          label: '임금총액',
+                          field: TextFormField(
+                            controller: w.wageTotalController,
+                            focusNode: _wageFocus,
+                            decoration: _dwOutlineDecoration(enabled: true),
+                            keyboardType: TextInputType.number,
+                            inputFormatters: <TextInputFormatter>[
+                              FilteringTextInputFormatter.digitsOnly,
+                            ],
+                            onChanged: (_) => widget.onChanged(),
+                          ),
+                        ),
+                      ),
+                      _fixedField(
+                        width: 150,
+                        child: CustomLabeledField(
+                          label: '이직사유코드',
+                          tooltip: _kTooltipSeparationReason,
+                          field: TextFormField(
+                            enabled: !disableEmploymentOnlyFields,
+                            controller: w.separationReasonCodeController,
+                            decoration: _dwOutlineDecoration(
+                              enabled: !disableEmploymentOnlyFields,
+                            ),
+                            onChanged: (_) => widget.onChanged(),
+                          ),
+                        ),
+                      ),
+                      _fixedField(
+                        width: 168,
+                        child: CustomLabeledField(
+                          label: '보험료부과구분 부호',
+                          tooltip: _kTooltipPremiumReason,
+                          labelTrailing: const _CodeRefIconButton(
+                            comCdClsfId: 'C201',
+                            tooltip: '보험료부과구분 공통코드표 (새 창)',
+                          ),
+                          field: TextFormField(
+                            enabled: !disableEmploymentOnlyFields,
+                            controller: w.premiumSignController,
+                            decoration: _dwOutlineDecoration(
+                              enabled: !disableEmploymentOnlyFields,
+                            ),
+                            onChanged: (_) => widget.onChanged(),
+                          ),
+                        ),
+                      ),
+                      _fixedField(
+                        width: 200,
+                        child: CustomLabeledField(
+                          label: '보험료부과구분 사유',
+                          tooltip: _kTooltipPremiumReason,
+                          labelTrailing: const _CodeRefIconButton(
+                            comCdClsfId: 'C201',
+                            tooltip: '보험료부과구분 공통코드표 (새 창)',
+                          ),
+                          field: TextFormField(
+                            enabled: !disableEmploymentOnlyFields,
+                            controller: w.premiumReasonController,
+                            decoration: _dwOutlineDecoration(
+                              enabled: !disableEmploymentOnlyFields,
+                            ),
+                            onChanged: (_) => widget.onChanged(),
+                          ),
+                        ),
+                      ),
+                      _fixedField(
+                        width: 176,
+                        child: CustomLabeledField(
+                          label: '국세청 일용근로소득 신고',
+                          field: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: disableEmploymentOnlyFields
+                                  ? const Color(0xFFF1F5F9)
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: <Widget>[
+                                Checkbox(
+                                  value: w.ntsDailyReport,
+                                  onChanged: disableEmploymentOnlyFields
+                                      ? null
+                                      : (bool? v) {
+                                          setState(
+                                            () => w.ntsDailyReport = v ?? false,
+                                          );
+                                          widget.onChanged();
+                                        },
+                                ),
+                                Text(
+                                  '신고',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: disableEmploymentOnlyFields
+                                        ? Colors.grey.shade600
+                                        : const Color(0xFF334155),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      _fixedField(
+                        width: 180,
+                        child: CustomLabeledField(
+                          label: '총지급액(과세)',
+                          field: TextFormField(
+                            controller: w.taxableTotalController,
+                            focusNode: _taxableFocus,
+                            decoration: _dwOutlineDecoration(enabled: true),
+                            keyboardType: TextInputType.number,
+                            inputFormatters: <TextInputFormatter>[
+                              FilteringTextInputFormatter.digitsOnly,
+                            ],
+                            onChanged: (_) => widget.onChanged(),
+                          ),
+                        ),
+                      ),
+                      _fixedField(
+                        width: 150,
+                        child: CustomLabeledField(
+                          label: '비과세소득',
+                          field: TextFormField(
+                            controller: w.nonTaxableController,
+                            decoration: _dwOutlineDecoration(enabled: true),
+                            keyboardType: TextInputType.number,
+                            inputFormatters: <TextInputFormatter>[
+                              FilteringTextInputFormatter.digitsOnly,
+                            ],
+                            onChanged: (_) => widget.onChanged(),
+                          ),
+                        ),
+                      ),
+                      _fixedField(
+                        width: 120,
+                        child: CustomLabeledField(
+                          label: '소득세',
+                          field: TextFormField(
+                            controller: w.incomeTaxController,
+                            decoration: _dwOutlineDecoration(enabled: true),
+                            keyboardType: TextInputType.number,
+                            inputFormatters: <TextInputFormatter>[
+                              FilteringTextInputFormatter.digitsOnly,
+                            ],
+                            onChanged: (_) => widget.onChanged(),
+                          ),
+                        ),
+                      ),
+                      _fixedField(
+                        width: 140,
+                        child: CustomLabeledField(
+                          label: '지방소득세',
+                          field: TextFormField(
+                            controller: w.localIncomeTaxController,
+                            decoration: _dwOutlineDecoration(enabled: true),
+                            keyboardType: TextInputType.number,
+                            inputFormatters: <TextInputFormatter>[
+                              FilteringTextInputFormatter.digitsOnly,
+                            ],
+                            onChanged: (_) => widget.onChanged(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      )
+                          : _buildCollapsedSummaryRow(w: w),
+                    ),
+                  ),
+                ),
+                if (_daysExpanded) ...<Widget>[
+                  const SizedBox(height: 10),
+                  _DaysAccordion(
+                    daysInMonth: widget.daysInMonth,
+                    values: w.days,
+                    onToggle: (int day0, bool v) {
+                      setState(() {
+                        w.days[day0] = v;
+                        w.applyWorkedDaysToBasePayDaysIfNeeded(
+                          widget.daysInMonth,
+                        );
+                      });
+                      widget.onChanged();
+                    },
+                  ),
+                ],
+              ],
             ),
           ),
         ),
@@ -2211,15 +3554,515 @@ class _DayCheckboxState extends State<_DayCheckbox> {
   }
 }
 
-class _DailyWorkerRow {
-  _DailyWorkerRow();
+class _InsuranceTypeField extends StatelessWidget {
+  const _InsuranceTypeField({
+    required this.industrialAccident,
+    required this.employment,
+    required this.onChanged,
+  });
+
+  final bool industrialAccident;
+  final bool employment;
+  final void Function(bool industrialAccident, bool employment) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    const TextStyle labelStyle = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w800,
+      color: Color(0xFF1E293B),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        const Text('보험구분', style: labelStyle),
+        const SizedBox(height: 4),
+        SizedBox(
+          width: 148,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Checkbox(
+                      value: industrialAccident,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                      onChanged: (bool? v) =>
+                          onChanged(v ?? false, employment),
+                    ),
+                    const Text('산재', style: labelStyle),
+                  ],
+                ),
+                const SizedBox(width: 8),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Checkbox(
+                      value: employment,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                      onChanged: (bool? v) =>
+                          onChanged(industrialAccident, v ?? false),
+                    ),
+                    const Text('고용', style: labelStyle),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 근로일(1~31) 키보드 Tab 순회·Space 토글 전용. InkWell/Checkbox 대신 Focus+GestureDetector로 키 이벤트를 안정적으로 수신.
+class _DayToggleButton extends StatefulWidget {
+  const _DayToggleButton({
+    required this.dayIndex0,
+    required this.dayLabel,
+    required this.value,
+    required this.focusNode,
+    required this.onToggle,
+  });
+
+  final int dayIndex0;
+  final int dayLabel;
+  final bool value;
+  final FocusNode focusNode;
+  final VoidCallback onToggle;
+
+  @override
+  State<_DayToggleButton> createState() => _DayToggleButtonState();
+}
+
+class _DayToggleButtonState extends State<_DayToggleButton> {
+  @override
+  void initState() {
+    super.initState();
+    widget.focusNode.addListener(_onFocusChange);
+  }
+
+  @override
+  void didUpdateWidget(covariant _DayToggleButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.focusNode != widget.focusNode) {
+      oldWidget.focusNode.removeListener(_onFocusChange);
+      widget.focusNode.addListener(_onFocusChange);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.focusNode.removeListener(_onFocusChange);
+    super.dispose();
+  }
+
+  void _onFocusChange() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _handleTap() {
+    widget.focusNode.requestFocus();
+    widget.onToggle();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool focused = widget.focusNode.hasFocus;
+    final bool v = widget.value;
+    return FocusTraversalOrder(
+      order: NumericFocusOrder(widget.dayIndex0.toDouble()),
+      child: Focus(
+        focusNode: widget.focusNode,
+        canRequestFocus: true,
+        skipTraversal: false,
+        onKeyEvent: (FocusNode node, KeyEvent event) {
+          if (event is KeyDownEvent &&
+              event.logicalKey == LogicalKeyboardKey.space) {
+            widget.focusNode.requestFocus();
+            widget.onToggle();
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
+        },
+        child: Listener(
+          onPointerDown: (_) => widget.focusNode.requestFocus(),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _handleTap,
+            child: Container(
+            width: 44,
+            height: 36,
+            decoration: BoxDecoration(
+              color: v ? _navy : Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: focused
+                    ? const Color(0xFFF59E0B)
+                    : const Color(0xFFE2E8F0),
+                width: focused ? 2.5 : 1,
+              ),
+              boxShadow: focused
+                  ? <BoxShadow>[
+                      BoxShadow(
+                        color: const Color(0xFFF59E0B).withOpacity(0.35),
+                        blurRadius: 4,
+                      ),
+                    ]
+                  : null,
+            ),
+            alignment: Alignment.center,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                '${widget.dayLabel}',
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: v ? Colors.white : const Color(0xFF334155),
+                ),
+              ),
+            ),
+          ),
+        ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DaysAccordion extends StatefulWidget {
+  const _DaysAccordion({
+    required this.daysInMonth,
+    required this.values,
+    required this.onToggle,
+  });
+
+  final int daysInMonth;
+  final List<bool> values;
+  final void Function(int day0, bool next) onToggle;
+
+  @override
+  State<_DaysAccordion> createState() => _DaysAccordionState();
+}
+
+class _DaysAccordionState extends State<_DaysAccordion> {
+  late final List<FocusNode> _dayFocusNodes;
+
+  @override
+  void initState() {
+    super.initState();
+    _dayFocusNodes = List<FocusNode>.generate(
+      31,
+      (int i) => FocusNode(debugLabel: 'daily_day_${i + 1}'),
+    );
+  }
+
+  @override
+  void dispose() {
+    for (final FocusNode n in _dayFocusNodes) {
+      n.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: _kTooltipDayNav,
+      child: Material(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: FocusScope(
+            debugLabel: 'dailyWorkerDayCells',
+            child: FocusTraversalGroup(
+              policy: WidgetOrderTraversalPolicy(),
+              child: Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: List<Widget>.generate(widget.daysInMonth, (int i) {
+                final bool v = widget.values[i];
+                return _DayToggleButton(
+                  dayIndex0: i,
+                  dayLabel: i + 1,
+                  value: v,
+                  focusNode: _dayFocusNodes[i],
+                  onToggle: () => widget.onToggle(i, !widget.values[i]),
+                );
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+    );
+  }
+}
+
+class ExcelExportService {
+  static Uint8List exportToXlsx({
+    required List<Worker> workers,
+    required int daysInMonth,
+    required String defaultPayMonth, // YYYYMM
+  }) {
+    final Excel excel = Excel.createExcel();
+    final Map<String, Sheet> tabs = excel.tables;
+    if (tabs.isEmpty) {
+      throw StateError('엑셀 시트를 만들 수 없습니다.');
+    }
+    if (!tabs.containsKey('서식')) {
+      final String? def = excel.getDefaultSheet();
+      if (def != null && tabs.containsKey(def)) {
+        excel.rename(def, '서식');
+      } else {
+        excel.rename(tabs.keys.first, '서식');
+      }
+    }
+    excel.setDefaultSheet('서식');
+    final Sheet sheet = excel['서식'];
+
+    final List<String> headers = <String>[
+      '보험구분',
+      '성명',
+      '주민(외국인)등록번호',
+      '국적코드',
+      '체류자격코드',
+      '전화(지역번호)',
+      '전화(국번)',
+      '전화(뒷번호)',
+      '직종코드',
+      for (int d = 1; d <= 31; d++) '${d}일',
+      '근로일수',
+      '일평균근로시간',
+      '보수지급기초일수',
+      '보수총액',
+      '임금총액',
+      '이직사유코드',
+      '보험료부과구분 부호',
+      '보험료부과구분 사유',
+      '국세청 일용근로소득 신고여부',
+      '지급월',
+      '총지급액(과세소득)',
+      '비과세소득',
+      '소득세',
+      '지방소득세',
+    ];
+    if (headers.length != 54) {
+      throw StateError('엑셀 헤더 열 개수 불일치: ${headers.length}');
+    }
+    const int headerRowIndex = 0;
+    for (int c = 0; c < headers.length; c++) {
+      sheet
+          .cell(
+            CellIndex.indexByColumnRow(
+              columnIndex: c,
+              rowIndex: headerRowIndex,
+            ),
+          )
+          .value = TextCellValue(headers[c]);
+    }
+
+    CellIndex idx(int col0, int rowIndex0) =>
+        CellIndex.indexByColumnRow(columnIndex: col0, rowIndex: rowIndex0);
+
+    void setText(int col0, int rowIndex0, String? v) {
+      final String s = (v ?? '').trim();
+      if (s.isEmpty) return;
+      sheet.cell(idx(col0, rowIndex0)).value = TextCellValue(s);
+    }
+
+    /// 빈 문자열도 셀에 반영해야 할 때(일별 근무·코드 강제 비움 등).
+    void setCellAlways(int col0, int rowIndex0, String s) {
+      sheet.cell(idx(col0, rowIndex0)).value = TextCellValue(s);
+    }
+
+    /// 데이터는 0-based로 1행(엑셀 2행)부터 기입한다.
+    const int firstDataRowIndex = 1;
+
+    for (int i = 0; i < workers.length; i++) {
+      final Worker w = workers[i];
+      final int rowIx = firstDataRowIndex + i;
+
+      final String insuranceCode = w.insuranceExportCode();
+      final bool sanjaeOnly = insuranceCode == '1';
+
+      // A~E: 보험구분(코드), 성명, 주민번호, 국적코드, 체류자격코드
+      setCellAlways(0, rowIx, insuranceCode);
+      setText(1, rowIx, w.name);
+      final String rrnDigits = w.rrn.replaceAll(RegExp(r'\D'), '');
+      setText(2, rowIx, rrnDigits.isEmpty ? '' : rrnDigits);
+      setText(3, rowIx, w.nationalityCodeController.text);
+      setText(4, rowIx, w.stayStatusCodeController.text);
+
+      // F~H: 전화 3분리
+      setText(5, rowIx, w.phoneAreaController.text);
+      setText(6, rowIx, w.phoneMidController.text);
+      setText(7, rowIx, w.phoneLastController.text);
+
+      // I: 직종코드
+      setText(8, rowIx, w.jobCodeController.text);
+
+      // J~AN: Col 9~39, 1일~31일 — 귀속월 일수 밖은 빈칸, true면 "1"·false면 ""
+      for (int d = 1; d <= 31; d++) {
+        final bool inMonth = d <= daysInMonth;
+        final bool worked = inMonth && w.days[d - 1];
+        setCellAlways(9 + (d - 1), rowIx, worked ? '1' : '');
+      }
+
+      // AO~AQ: 근로일수, 일평균근로시간, 보수지급기초일수
+      setText(40, rowIx, w.workedDaysCount(daysInMonth).toString());
+      setText(41, rowIx, w.avgWorkHoursController.text);
+      setText(42, rowIx, w.basePayDaysController.text);
+
+      // AR~AT: 보수총액, 임금총액, 이직사유코드
+      setText(43, rowIx, w.totalPayController.text);
+      setText(44, rowIx, w.wageTotalController.text);
+      if (sanjaeOnly) {
+        setCellAlways(45, rowIx, '');
+      } else {
+        setText(45, rowIx, w.separationReasonCodeController.text);
+      }
+
+      // AU~AV: 보험료부과구분 부호, 보험료부과구분 사유
+      if (sanjaeOnly) {
+        setCellAlways(46, rowIx, '');
+        setCellAlways(47, rowIx, '');
+      } else {
+        setText(46, rowIx, w.premiumSignController.text);
+        setText(47, rowIx, w.premiumReasonController.text);
+      }
+
+      // AW: 국세청 신고여부 — 산재 단독이면 무조건 빈칸
+      if (sanjaeOnly) {
+        setCellAlways(48, rowIx, '');
+      } else {
+        setCellAlways(48, rowIx, w.ntsDailyReport ? '1' : '');
+      }
+
+      // AX: 지급월 — 전역 `defaultPayMonth`만 모든 행에 동일 적용
+      setText(49, rowIx, defaultPayMonth);
+
+      // AY~BB: 과세/비과세/세금
+      setText(50, rowIx, w.taxableTotalController.text);
+      setText(51, rowIx, w.nonTaxableController.text);
+      setText(52, rowIx, w.incomeTaxController.text);
+      setText(53, rowIx, w.localIncomeTaxController.text);
+    }
+
+    final List<int>? encoded = excel.encode();
+    if (encoded == null || encoded.isEmpty) {
+      throw StateError('엑셀 인코딩 실패');
+    }
+    return Uint8List.fromList(encoded);
+  }
+}
+
+class Worker {
+  Worker();
+
+  /// 신규 양식 Line 1
+  bool industrialAccident = false; // 산재
+  bool employment = false; // 고용
+
+  /// 고용 미가입·산재만 가입 시 고용 전용 입력 비활성화
+  bool get onlyIndustrialInsurance => industrialAccident && !employment;
 
   final TextEditingController nameController = TextEditingController();
   final TextEditingController rrnController = TextEditingController();
+  final TextEditingController nationalityCodeController = TextEditingController();
+  final TextEditingController stayStatusCodeController = TextEditingController();
+  final TextEditingController phoneAreaController = TextEditingController();
+  final TextEditingController phoneMidController = TextEditingController();
+  final TextEditingController phoneLastController = TextEditingController();
+  final TextEditingController jobCodeController = TextEditingController();
+
+  /// 공통: 근로일 (1~31)
   final List<bool> days = List<bool>.filled(31, false);
+
+  /// 신규 양식 Line 2
+  final TextEditingController avgWorkHoursController = TextEditingController();
+  final TextEditingController basePayDaysController = TextEditingController();
+  final TextEditingController totalPayController = TextEditingController();
+  final TextEditingController wageTotalController = TextEditingController();
+  final TextEditingController separationReasonCodeController =
+      TextEditingController();
+  final TextEditingController premiumSignController = TextEditingController();
+  final TextEditingController premiumReasonController = TextEditingController();
+  bool ntsDailyReport = false;
+  final TextEditingController taxableTotalController = TextEditingController();
+  final TextEditingController nonTaxableController = TextEditingController();
+  final TextEditingController incomeTaxController = TextEditingController();
+  final TextEditingController localIncomeTaxController = TextEditingController();
+
+  /// 임금총액을 보수총액 자동연동으로 덮어쓰지 않음(사용자가 임금칸에서 수정한 경우).
+  bool _wageEdited = false;
+  /// 총지급액(과세)을 보수총액 자동연동으로 덮어쓰지 않음.
+  bool _taxableEdited = false;
+  /// 보수지급기초일수를 근로일수 자동연동으로 덮어쓰지 않음.
+  bool _basePayDaysUserEdited = false;
 
   String get name => nameController.text.trim();
   String get rrn => rrnController.text.trim();
+
+  int workedDaysCount(int daysInMonth) {
+    final int len = math.min(daysInMonth, 31);
+    int c = 0;
+    for (int i = 0; i < len; i++) {
+      if (days[i]) c++;
+    }
+    return c;
+  }
+
+  void dispose() {
+    nameController.dispose();
+    rrnController.dispose();
+    nationalityCodeController.dispose();
+    stayStatusCodeController.dispose();
+    phoneAreaController.dispose();
+    phoneMidController.dispose();
+    phoneLastController.dispose();
+    jobCodeController.dispose();
+    avgWorkHoursController.dispose();
+    basePayDaysController.dispose();
+    totalPayController.dispose();
+    wageTotalController.dispose();
+    separationReasonCodeController.dispose();
+    premiumSignController.dispose();
+    premiumReasonController.dispose();
+    taxableTotalController.dispose();
+    nonTaxableController.dispose();
+    incomeTaxController.dispose();
+    localIncomeTaxController.dispose();
+  }
+
+  /// 보수총액 포커스 아웃 시에만 임금총액·총지급액(과세)에 동일 값 복사(수동 수정 분은 유지).
+  void applyTotalPayLinkOnFocusOut() {
+    final String t = totalPayController.text.trim();
+    if (!_wageEdited) {
+      wageTotalController.text = t;
+    }
+    if (!_taxableEdited) {
+      taxableTotalController.text = t;
+    }
+  }
+
+  /// 근로일수(체크 합)를 보수지급기초일수에 반영(수동 수정 시 스킵).
+  void applyWorkedDaysToBasePayDaysIfNeeded(int daysInMonth) {
+    if (_basePayDaysUserEdited) {
+      return;
+    }
+    basePayDaysController.text = '${workedDaysCount(daysInMonth)}';
+  }
 
   Map<String, dynamic> toJson(int daysInMonth) {
     final int len = math.min(daysInMonth, 31);
@@ -2228,6 +4071,28 @@ class _DailyWorkerRow {
       'rrn': rrn,
       'days': days.take(len).toList(),
     };
+  }
+
+  /// 엑셀용 1컬럼 보험구분(요구사항에 코드 정의가 없어 문자열로 내보냄)
+  String insuranceLabel() {
+    if (industrialAccident && employment) return '산재+고용';
+    if (industrialAccident) return '산재';
+    if (employment) return '고용';
+    return '';
+  }
+
+  /// 전자신고 엑셀 A열: 산재만 1, 고용만 3, 산재+고용 5
+  String insuranceExportCode() {
+    if (industrialAccident && employment) {
+      return '5';
+    }
+    if (industrialAccident) {
+      return '1';
+    }
+    if (employment) {
+      return '3';
+    }
+    return '';
   }
 }
 
@@ -2506,7 +4371,7 @@ class _MonthlyWorkCheckDialogState extends State<_MonthlyWorkCheckDialog> {
         width: 980,
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Row(
               children: <Widget>[

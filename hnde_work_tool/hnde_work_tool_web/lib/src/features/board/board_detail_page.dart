@@ -321,7 +321,8 @@ class _BoardDetailPageState extends State<BoardDetailPage> {
                                     future: canDelete(),
                                     builder: (BuildContext context, AsyncSnapshot<bool> canDelSnap) {
                                       final bool canDel = canDelSnap.data ?? false;
-                                      final bool canEdit = isAuthor; // 작성자만 수정
+                                      // 수정 권한: 본인 작성자 또는 관리자(roleIdx 0/1, mainAdmin/hrAdmin)
+                                      final bool canEdit = isAuthor || canDel;
                                       if (!canDel && !canEdit) return const SizedBox.shrink();
                                       return PopupMenuButton<String>(
                                         enabled: !_postActionBusy,

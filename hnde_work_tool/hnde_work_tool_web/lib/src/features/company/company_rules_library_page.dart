@@ -41,13 +41,38 @@ class _CompanyRulesPageState extends State<CompanyRulesPage> {
 
   List<CompanyRuleFileModel> _filter(List<CompanyRuleFileModel> list) {
     final String q = _appliedQuery.toLowerCase();
-    if (q.isEmpty) {
-      return list;
+    final List<CompanyRuleFileModel> base = q.isEmpty
+        ? List<CompanyRuleFileModel>.from(list)
+        : list
+            .where((CompanyRuleFileModel e) =>
+                e.fileName.toLowerCase().contains(q))
+            .toList();
+    base.sort((CompanyRuleFileModel a, CompanyRuleFileModel b) =>
+        _naturalCompare(a.fileName, b.fileName));
+    return base;
+  }
+
+  /// 숫자가 섞인 파일명을 자연 정렬: "1, 2, 9, 10, 11" 순.
+  static int _naturalCompare(String a, String b) {
+    final RegExp re = RegExp(r'(\d+)|(\D+)');
+    final List<RegExpMatch> ta = re.allMatches(a).toList();
+    final List<RegExpMatch> tb = re.allMatches(b).toList();
+    final int len = ta.length < tb.length ? ta.length : tb.length;
+    for (int i = 0; i < len; i++) {
+      final String? aNum = ta[i].group(1);
+      final String? bNum = tb[i].group(1);
+      int cmp;
+      if (aNum != null && bNum != null) {
+        cmp = BigInt.parse(aNum).compareTo(BigInt.parse(bNum));
+        if (cmp == 0) {
+          cmp = aNum.length.compareTo(bNum.length);
+        }
+      } else {
+        cmp = ta[i][0]!.toLowerCase().compareTo(tb[i][0]!.toLowerCase());
+      }
+      if (cmp != 0) return cmp;
     }
-    return list
-        .where((CompanyRuleFileModel e) =>
-            e.fileName.toLowerCase().contains(q))
-        .toList();
+    return ta.length.compareTo(tb.length);
   }
 
   Future<void> _pickAndUpload(

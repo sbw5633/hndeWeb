@@ -48,8 +48,15 @@ String? _exchangeListStatusLine({
             roleIdx: roleIdx,
           ) ||
           RoleConstants.canViewAllBranches(roleIdx));
+  /// mainAdmin: 본인이 만든 요청이 아니어도 전 사업소 진행률을 항상 노출.
+  final bool isMainAdminViewer = SuperAdmin.effectiveMainAdmin(
+    profileMainAdmin: profile['mainAdmin'],
+    profileEmail: profile['email'] as String?,
+    authEmail: FirebaseAuth.instance.currentUser?.email,
+    roleIdx: roleIdx,
+  );
   final bool showRequesterPanel =
-      isRequesterViewer || isRequesterViewerLegacy;
+      isRequesterViewer || isRequesterViewerLegacy || isMainAdminViewer;
 
   final List<SubmissionSiteModel> list = sites ?? <SubmissionSiteModel>[];
   if (showRequesterPanel) {

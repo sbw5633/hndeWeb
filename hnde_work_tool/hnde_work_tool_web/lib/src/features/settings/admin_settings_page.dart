@@ -11,6 +11,7 @@ import '../../constants/firestore_paths.dart';
 import '../../constants/super_admin.dart';
 import '../../models/branch_model.dart';
 import '../../repositories/work_firestore_repository.dart';
+import '../common/app_user_avatar.dart';
 import '../common/enterprise_scaffold.dart';
 import '../common/merged_user_profile_stream_builder.dart';
 import 'branch_edit_form.dart';
@@ -667,6 +668,10 @@ class _StaffListViewState extends State<_StaffListView> {
                         final String email = (s['email'] ?? '') as String? ?? '';
                         final String personName = _staffMirrorPersonName(s);
                         final String primaryName = personName.isEmpty ? '-' : personName;
+                        final String? photoUrl =
+                            (s['photoUrl'] as String?)?.trim().isNotEmpty == true
+                                ? (s['photoUrl'] as String).trim()
+                                : null;
                         final String branch = (s['branchName'] ?? s['branch'] ?? '-') as String? ?? '-';
                         final String roleChip = _staffUiRoleFromMirror(s);
                         final String phone = (s['phone'] ?? '') as String? ?? '';
@@ -701,14 +706,12 @@ class _StaffListViewState extends State<_StaffListView> {
                                           ),
                                         ),
                                       ),
-                                    Container(
-                                      width: 40,
-                                      height: 40,
-                                      decoration: const BoxDecoration(
-                                        color: _slate50,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: const Icon(Icons.person, color: _slate400, size: 20),
+                                    AppUserAvatar(
+                                      size: 40,
+                                      photoUrl: photoUrl,
+                                      fallbackText: primaryName,
+                                      backgroundColor: _slate50,
+                                      foregroundColor: _slate400,
                                     ),
                                     const SizedBox(width: 10),
                                     Expanded(
@@ -1180,16 +1183,21 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
                       shape: BoxShape.circle,
                       border: Border.all(color: const Color(0xFFE2E8F0)),
                     ),
+                    clipBehavior: Clip.antiAlias,
                     child: _photoBytes != null && _photoBytes!.isNotEmpty
-                        ? ClipOval(
-                            child: Image.memory(
-                              _photoBytes!,
-                              width: 72,
-                              height: 72,
-                              fit: BoxFit.cover,
-                            ),
+                        ? Image.memory(
+                            _photoBytes!,
+                            width: 72,
+                            height: 72,
+                            fit: BoxFit.cover,
                           )
-                        : const Icon(Icons.person, color: _slate400),
+                        : AppUserAvatar(
+                            size: 72,
+                            photoUrl: (widget.staff['photoUrl'] as String?),
+                            fallbackText: _staffMirrorPersonName(widget.staff),
+                            backgroundColor: _slate50,
+                            foregroundColor: _slate400,
+                          ),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
@@ -1302,19 +1310,56 @@ class _StaffEditDialogState extends State<_StaffEditDialog> {
                 ],
               ),
               const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: _branch,
-                decoration: const InputDecoration(
-                  labelText: '소속 사업소',
-                  border: OutlineInputBorder(),
-                ),
-                items: const <DropdownMenuItem<String>>[
-                  DropdownMenuItem(value: '본사', child: Text('본사')),
-                  DropdownMenuItem(value: '인천 사업소', child: Text('인천 사업소')),
-                  DropdownMenuItem(value: '서울 지부', child: Text('서울 지부')),
-                ],
-                onChanged: (String? v) =>
-                    setState(() => _branch = v ?? _branch),
+              StreamBuilder<List<BranchModel>>(
+                stream: _repo.watchBranches(),
+                builder: (
+                  BuildContext context,
+                  AsyncSnapshot<List<BranchModel>> snap,
+                ) {
+                  final List<BranchModel> branches =
+                      snap.data ?? <BranchModel>[];
+                  final List<String> names = branches
+                      .map((BranchModel b) => b.name)
+                      .toList();
+                  final bool currentExists =
+                      _branch.isNotEmpty && names.contains(_branch);
+                  if (_branch.isNotEmpty && !currentExists) {
+                    names.insert(0, _branch);
+                  }
+                  if (names.isEmpty) {
+                    return InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: '소속 사업소',
+                        border: OutlineInputBorder(),
+                      ),
+                      child: Text(
+                        snap.connectionState == ConnectionState.waiting
+                            ? '사업소 목록을 불러오는 중…'
+                            : '등록된 사업소가 없습니다.',
+                        style: const TextStyle(color: _slate400),
+                      ),
+                    );
+                  }
+                  return DropdownButtonFormField<String>(
+                    value: _branch.isNotEmpty ? _branch : names.first,
+                    decoration: const InputDecoration(
+                      labelText: '소속 사업소',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: names
+                        .map(
+                          (String n) => DropdownMenuItem<String>(
+                            value: n,
+                            child: Text(n),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: _saving
+                        ? null
+                        : (String? v) =>
+                            setState(() => _branch = v ?? _branch),
+                  );
+                },
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -1707,19 +1752,68 @@ class _StaffEditForm extends StatelessWidget {
                         Expanded(
                           child: _EditField(
                             label: '소속 사업소',
-                            child: DropdownButtonFormField<String>(
-                              value: data['branch'] as String,
-                              decoration: InputDecoration(
-                                filled: true,
-                                fillColor: _slate50,
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-                              ),
-                              items: const <DropdownMenuItem<String>>[
-                                DropdownMenuItem(value: '본사', child: Text('본사')),
-                                DropdownMenuItem(value: '인천 사업소', child: Text('인천 사업소')),
-                                DropdownMenuItem(value: '서울 지부', child: Text('서울 지부')),
-                              ],
-                              onChanged: (_) {},
+                            child: StreamBuilder<List<BranchModel>>(
+                              stream: context
+                                  .read<WorkFirestoreRepository>()
+                                  .watchBranches(),
+                              builder: (
+                                BuildContext context,
+                                AsyncSnapshot<List<BranchModel>> snap,
+                              ) {
+                                final String current =
+                                    (data['branch'] as String?) ?? '';
+                                final List<String> names = (snap.data ??
+                                        <BranchModel>[])
+                                    .map((BranchModel b) => b.name)
+                                    .toList();
+                                if (current.isNotEmpty &&
+                                    !names.contains(current)) {
+                                  names.insert(0, current);
+                                }
+                                if (names.isEmpty) {
+                                  return InputDecorator(
+                                    decoration: InputDecoration(
+                                      filled: true,
+                                      fillColor: _slate50,
+                                      border: OutlineInputBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(16),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      snap.connectionState ==
+                                              ConnectionState.waiting
+                                          ? '사업소 목록을 불러오는 중…'
+                                          : '등록된 사업소가 없습니다.',
+                                      style:
+                                          const TextStyle(color: _slate400),
+                                    ),
+                                  );
+                                }
+                                return DropdownButtonFormField<String>(
+                                  value: current.isNotEmpty
+                                      ? current
+                                      : names.first,
+                                  decoration: InputDecoration(
+                                    filled: true,
+                                    fillColor: _slate50,
+                                    border: OutlineInputBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(16),
+                                    ),
+                                  ),
+                                  items: names
+                                      .map(
+                                        (String n) =>
+                                            DropdownMenuItem<String>(
+                                          value: n,
+                                          child: Text(n),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onChanged: (_) {},
+                                );
+                              },
                             ),
                           ),
                         ),

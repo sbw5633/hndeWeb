@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../constants/firestore_paths.dart';
+import '../../models/branch_model.dart';
 import '../../models/todo_item_model.dart' show TodoItemModel, TodoTypes;
 import '../../repositories/work_firestore_repository.dart';
 import '../common/loading_widget.dart';
@@ -14,6 +15,10 @@ Future<void> showCalendarScheduleModal(
   BuildContext context, {
   required DateTime baseDate,
   required String branchName,
+  bool isMainAdmin = false,
+  List<BranchModel> branches = const <BranchModel>[],
+  String? editEventId,
+  Map<String, dynamic>? existingData,
 }) {
   return showGeneralDialog<void>(
     context: context,
@@ -48,6 +53,10 @@ Future<void> showCalendarScheduleModal(
           child: _CalendarScheduleDialog(
             branchName: branchName,
             baseDate: baseDate,
+            isMainAdmin: isMainAdmin,
+            branches: branches,
+            editEventId: editEventId,
+            existingData: existingData,
           ),
         ),
       );
@@ -59,10 +68,18 @@ class _CalendarScheduleDialog extends StatefulWidget {
   const _CalendarScheduleDialog({
     required this.branchName,
     required this.baseDate,
+    this.isMainAdmin = false,
+    this.branches = const <BranchModel>[],
+    this.editEventId,
+    this.existingData,
   });
 
   final String branchName;
   final DateTime baseDate;
+  final bool isMainAdmin;
+  final List<BranchModel> branches;
+  final String? editEventId;
+  final Map<String, dynamic>? existingData;
 
   @override
   State<_CalendarScheduleDialog> createState() => _CalendarScheduleDialogState();
@@ -73,9 +90,20 @@ class _CalendarScheduleDialogState extends State<_CalendarScheduleDialog> {
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _contentController = TextEditingController();
   late DateTimeRange _range;
-  String _scope = 'private'; // private | branch
+
+  /// 'private' | 'mine' | 'company' | 'other'
+  /// - mine: 본인 사업소
+  /// - company: 전사 (mainAdmin 전용)
+  /// - other: 다른 사업소 다중 선택 (mainAdmin 전용)
+  String _scopeKey = 'private';
+
+  /// scopeKey == 'other' 일 때 선택된 사업소들
+  final Set<String> _selectedOtherBranches = <String>{};
+
   bool _addToTodo = false;
   bool _saving = false;
+
+  bool get _isEdit => widget.editEventId != null;
 
   static DateTime _dayOnly(DateTime d) =>
       DateTime(d.year, d.month, d.day);
@@ -84,11 +112,53 @@ class _CalendarScheduleDialogState extends State<_CalendarScheduleDialog> {
   void initState() {
     super.initState();
     _repo = context.read<WorkFirestoreRepository>();
-    final DateTime base = _dayOnly(widget.baseDate);
-    _range = DateTimeRange(
-      start: base,
-      end: base.add(const Duration(hours: 1)),
-    );
+    final Map<String, dynamic>? old = widget.existingData;
+    if (old != null) {
+      _titleController.text = (old['title'] as String?) ?? '';
+      _contentController.text = (old['content'] as String?) ?? '';
+      final Timestamp? ts = old['start'] as Timestamp?;
+      final Timestamp? te = old['end'] as Timestamp?;
+      final DateTime startDt = ts?.toDate() ?? _dayOnly(widget.baseDate);
+      final DateTime endDt =
+          te?.toDate() ?? startDt.add(const Duration(hours: 1));
+      _range = DateTimeRange(start: startDt, end: endDt);
+
+      final String scope = (old['scope'] as String?)?.trim() ?? 'private';
+      if (scope == 'private') {
+        _scopeKey = 'private';
+      } else if (scope == 'company') {
+        _scopeKey = 'company';
+      } else if (scope == 'branch') {
+        final List<String> targets = <String>[];
+        final dynamic raw = old['targetBranches'];
+        if (raw is List) {
+          for (final dynamic e in raw) {
+            if (e is String && e.trim().isNotEmpty) targets.add(e.trim());
+          }
+        }
+        final String single =
+            (old['branchName'] as String?)?.trim() ?? '';
+        if (single.isNotEmpty && !targets.contains(single)) {
+          targets.add(single);
+        }
+        final bool onlyMyBranch =
+            targets.length == 1 && targets.first == widget.branchName;
+        if (onlyMyBranch) {
+          _scopeKey = 'mine';
+        } else {
+          _scopeKey = 'other';
+          _selectedOtherBranches.addAll(targets);
+        }
+      } else {
+        _scopeKey = 'private';
+      }
+    } else {
+      final DateTime base = _dayOnly(widget.baseDate);
+      _range = DateTimeRange(
+        start: base,
+        end: base.add(const Duration(hours: 1)),
+      );
+    }
   }
 
   @override
@@ -142,67 +212,139 @@ class _CalendarScheduleDialogState extends State<_CalendarScheduleDialog> {
     }
   }
 
+  /// 현재 _scopeKey로부터 Firestore에 저장할 scope/branchName/targetBranches를 계산.
+  Map<String, dynamic> _resolveScopeFields() {
+    switch (_scopeKey) {
+      case 'private':
+        return <String, dynamic>{
+          'scope': 'private',
+        };
+      case 'company':
+        return <String, dynamic>{
+          'scope': 'company',
+        };
+      case 'mine':
+        return <String, dynamic>{
+          'scope': 'branch',
+          'branchName': widget.branchName,
+          'targetBranches': <String>[widget.branchName],
+        };
+      case 'other':
+        final List<String> list = _selectedOtherBranches.toList()..sort();
+        return <String, dynamic>{
+          'scope': 'branch',
+          // 호환성을 위해 branchName 은 첫 번째 사업소 보존
+          if (list.isNotEmpty) 'branchName': list.first,
+          'targetBranches': list,
+        };
+      default:
+        return <String, dynamic>{'scope': 'private'};
+    }
+  }
+
+  String? _validateScope() {
+    if (_scopeKey == 'other' && _selectedOtherBranches.isEmpty) {
+      return '대상 사업소를 1개 이상 선택하세요.';
+    }
+    return null;
+  }
+
   Future<void> _save() async {
     if (_saving) {
+      return;
+    }
+    final String? err = _validateScope();
+    if (err != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(err)),
+      );
       return;
     }
     setState(() {
       _saving = true;
     });
 
-    final DateTimeRange range = _range;
+    try {
+      final DateTimeRange range = _range;
 
-    List<String> dayKeys =
-        calendarDayKeysTouchingInterval(range.start, range.end);
-    if (dayKeys.isEmpty) {
-      dayKeys = <String>[calendarDayKeyString(range.start)];
-    }
+      List<String> dayKeys =
+          calendarDayKeysTouchingInterval(range.start, range.end);
+      if (dayKeys.isEmpty) {
+        dayKeys = <String>[calendarDayKeyString(range.start)];
+      }
 
-    final String? uid = FirebaseAuth.instance.currentUser?.uid;
-    final DocumentReference<Map<String, dynamic>> ref =
-        await FirestorePaths.calendarEventsCol().add(<String, dynamic>{
-      'title': _titleController.text.trim().isEmpty
-          ? '제목 없음'
-          : _titleController.text.trim(),
-      'start': Timestamp.fromDate(range.start),
-      'end': Timestamp.fromDate(range.end),
-      'dayKeys': dayKeys,
-      'content': _contentController.text.trim(),
-      'scope': _scope,
-      if (_scope == 'branch') 'branchName': widget.branchName,
-      if (uid != null && uid.trim().isNotEmpty) 'createdByUid': uid.trim(),
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-
-    final String savedTitle = _titleController.text.trim().isEmpty
-        ? '제목 없음'
-        : _titleController.text.trim();
-    await _repo.notifyCalendarEventCreated(
-      eventId: ref.id,
-      scope: _scope,
-      titleText: savedTitle,
-      branchName: widget.branchName,
-    );
-
-    if (_addToTodo) {
-      final String title = _titleController.text.trim().isEmpty
+      final Map<String, dynamic> scopeFields = _resolveScopeFields();
+      final String resolvedScope = scopeFields['scope'] as String;
+      final String savedTitle = _titleController.text.trim().isEmpty
           ? '제목 없음'
           : _titleController.text.trim();
-      await _repo.upsertTodo(
-        TodoItemModel(
-          id: '',
-          title: title,
-          dateKeys: dayKeys,
-          completed: false,
-          type: TodoTypes.calendar,
-          linkedCalendarEventId: ref.id,
-          detail: _contentController.text.trim(),
-        ),
-      );
-    }
 
-    if (mounted) {
-      Navigator.of(context).pop();
+      final String? uid = FirebaseAuth.instance.currentUser?.uid;
+
+      final Map<String, dynamic> payload = <String, dynamic>{
+        'title': savedTitle,
+        'start': Timestamp.fromDate(range.start),
+        'end': Timestamp.fromDate(range.end),
+        'dayKeys': dayKeys,
+        'content': _contentController.text.trim(),
+        ...scopeFields,
+      };
+
+      late final String eventId;
+
+      if (_isEdit) {
+        eventId = widget.editEventId!;
+        await _repo.updateCalendarEvent(eventId, payload);
+      } else {
+        if (uid != null && uid.trim().isNotEmpty) {
+          payload['createdByUid'] = uid.trim();
+        }
+        payload['createdAt'] = FieldValue.serverTimestamp();
+        final DocumentReference<Map<String, dynamic>> ref =
+            await FirestorePaths.calendarEventsCol().add(payload);
+        eventId = ref.id;
+
+        final List<String> notifyBranches = <String>[];
+        if (resolvedScope == 'branch') {
+          final dynamic tb = scopeFields['targetBranches'];
+          if (tb is List<String>) {
+            notifyBranches.addAll(tb);
+          }
+        }
+        await _repo.notifyCalendarEventCreated(
+          eventId: eventId,
+          scope: resolvedScope,
+          titleText: savedTitle,
+          branchNames: notifyBranches,
+        );
+
+        if (_addToTodo) {
+          await _repo.upsertTodo(
+            TodoItemModel(
+              id: '',
+              title: savedTitle,
+              dateKeys: dayKeys,
+              completed: false,
+              type: TodoTypes.calendar,
+              linkedCalendarEventId: eventId,
+              detail: _contentController.text.trim(),
+            ),
+          );
+        }
+      }
+
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('저장 중 오류: $e')),
+        );
+      }
     }
   }
 
@@ -220,9 +362,12 @@ class _CalendarScheduleDialogState extends State<_CalendarScheduleDialog> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                const Text(
-                  '일정 등록',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                Text(
+                  _isEdit ? '일정 수정' : '일정 등록',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 18),
                 TextField(
@@ -243,22 +388,23 @@ class _CalendarScheduleDialogState extends State<_CalendarScheduleDialog> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                CheckboxListTile(
-                  value: _addToTodo,
-                  onChanged: (bool? v) {
-                    if (v == null) return;
-                    setState(() => _addToTodo = v);
-                  },
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text(
-                    'Todo에도 추가',
-                    style: TextStyle(fontWeight: FontWeight.w700),
+                if (!_isEdit)
+                  CheckboxListTile(
+                    value: _addToTodo,
+                    onChanged: (bool? v) {
+                      if (v == null) return;
+                      setState(() => _addToTodo = v);
+                    },
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(
+                      'Todo에도 추가',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: const Text(
+                      '체크하면 해당 날짜 Todo 리스트에도 같이 등록됩니다.',
+                      style: TextStyle(fontSize: 12),
+                    ),
                   ),
-                  subtitle: const Text(
-                    '체크하면 해당 날짜 Todo 리스트에도 같이 등록됩니다.',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                ),
                 const SizedBox(height: 12),
                 Text(
                   '일자 · 기간',
@@ -326,23 +472,33 @@ class _CalendarScheduleDialogState extends State<_CalendarScheduleDialog> {
                   children: <Widget>[
                     Expanded(
                       child: DropdownButtonFormField<String>(
-                        value: _scope,
+                        value: _scopeKey,
                         items: <DropdownMenuItem<String>>[
-                          DropdownMenuItem<String>(
+                          const DropdownMenuItem<String>(
                             value: 'private',
                             child: Text('개인일정'),
                           ),
                           DropdownMenuItem<String>(
-                            value: 'branch',
+                            value: 'mine',
                             child: Text('${widget.branchName} 일정'),
                           ),
+                          if (widget.isMainAdmin) ...<DropdownMenuItem<String>>[
+                            const DropdownMenuItem<String>(
+                              value: 'company',
+                              child: Text('전사 일정'),
+                            ),
+                            const DropdownMenuItem<String>(
+                              value: 'other',
+                              child: Text('다른 사업소 일정 (선택)'),
+                            ),
+                          ],
                         ],
                         onChanged: (String? value) {
                           if (value == null) {
                             return;
                           }
                           setState(() {
-                            _scope = value;
+                            _scopeKey = value;
                           });
                         },
                         decoration: const InputDecoration(
@@ -352,6 +508,20 @@ class _CalendarScheduleDialogState extends State<_CalendarScheduleDialog> {
                     ),
                   ],
                 ),
+                if (_scopeKey == 'other' && widget.isMainAdmin) ...<Widget>[
+                  const SizedBox(height: 12),
+                  _OtherBranchesPicker(
+                    branches: widget.branches,
+                    selected: _selectedOtherBranches,
+                    onChanged: (Set<String> next) {
+                      setState(() {
+                        _selectedOtherBranches
+                          ..clear()
+                          ..addAll(next);
+                      });
+                    },
+                  ),
+                ],
                 const SizedBox(height: 22),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
@@ -369,7 +539,7 @@ class _CalendarScheduleDialogState extends State<_CalendarScheduleDialog> {
                               height: 24,
                               child: LoadingWidget(size: 16, duration: Duration(milliseconds: 1000)),
                             )
-                          : const Text('저장'),
+                          : Text(_isEdit ? '저장' : '등록'),
                     ),
                   ],
                 ),
@@ -377,6 +547,85 @@ class _CalendarScheduleDialogState extends State<_CalendarScheduleDialog> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _OtherBranchesPicker extends StatelessWidget {
+  const _OtherBranchesPicker({
+    required this.branches,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final List<BranchModel> branches;
+  final Set<String> selected;
+  final ValueChanged<Set<String>> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<BranchModel> sorted = <BranchModel>[...branches]
+      ..sort((BranchModel a, BranchModel b) => a.name.compareTo(b.name));
+    final bool allSelected =
+        sorted.isNotEmpty && sorted.every((BranchModel b) => selected.contains(b.name));
+
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Text(
+                '대상 사업소',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+              ),
+              const Spacer(),
+              TextButton(
+                onPressed: () {
+                  if (allSelected) {
+                    onChanged(<String>{});
+                  } else {
+                    onChanged(
+                      sorted.map((BranchModel b) => b.name).toSet(),
+                    );
+                  }
+                },
+                child: Text(allSelected ? '전체 해제' : '전체 선택'),
+              ),
+            ],
+          ),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 220),
+            child: SingleChildScrollView(
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: sorted.map((BranchModel b) {
+                  final bool checked = selected.contains(b.name);
+                  return FilterChip(
+                    label: Text(b.name),
+                    selected: checked,
+                    onSelected: (bool v) {
+                      final Set<String> next = <String>{...selected};
+                      if (v) {
+                        next.add(b.name);
+                      } else {
+                        next.remove(b.name);
+                      }
+                      onChanged(next);
+                    },
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
